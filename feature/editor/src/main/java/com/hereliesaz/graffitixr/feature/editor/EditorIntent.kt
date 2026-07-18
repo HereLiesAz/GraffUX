@@ -56,6 +56,7 @@ internal sealed interface EditorIntent {
     // ── Tool / panel / mode / gesture ─────────────────────────────────────────
     data class SetActiveTool(val tool: Tool) : EditorIntent
     data object ToggleAdjustPanel : EditorIntent
+    data object ToggleLayersPanel : EditorIntent
     data object DismissPanel : EditorIntent
     data class SetEditorMode(val mode: EditorMode) : EditorIntent
 
