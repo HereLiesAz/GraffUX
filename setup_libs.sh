@@ -58,6 +58,15 @@ else
     exit 1
 fi
 
+# 4b. Patch the OpenCV module's build.gradle for the current AGP: getDefaultProguardFile(
+# 'proguard-android.txt') is rejected (it bundles -dontoptimize). Switch to the -optimize variant
+# (this is how GraffitiXR carries its committed copy of the SDK).
+OPENCV_BUILD_GRADLE="${TARGET_OPENCV}/sdk/build.gradle"
+if [ -f "$OPENCV_BUILD_GRADLE" ]; then
+    echo "[+] Patching OpenCV proguard default (AGP compatibility)..."
+    sed -i "s/getDefaultProguardFile('proguard-android.txt')/getDefaultProguardFile('proguard-android-optimize.txt')/g" "$OPENCV_BUILD_GRADLE"
+fi
+
 # 5. Cleanup
 echo "[+] Cleaning up..."
 rm "${TARGET_BASE}/${OPENCV_ZIP}"
