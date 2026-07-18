@@ -67,6 +67,16 @@ if [ -f "$OPENCV_BUILD_GRADLE" ]; then
     sed -i "s/getDefaultProguardFile('proguard-android.txt')/getDefaultProguardFile('proguard-android-optimize.txt')/g" "$OPENCV_BUILD_GRADLE"
 fi
 
+# 4c. Inject the custom opencv2/geometry headers the native SLAM code (#include <opencv2/geometry.hpp>)
+# depends on. GraffitiXR adds these to its committed OpenCV SDK; GraphiXR keeps them under
+# core/nativebridge/opencv-geometry/ (outside the fetched, gitignored OpenCV tree) and copies them in.
+OPENCV_INCLUDE="${TARGET_OPENCV}/sdk/native/jni/include/opencv2"
+GEOM_SRC="${TARGET_BASE}/../opencv-geometry/opencv2"
+if [ -d "$GEOM_SRC" ] && [ -d "$OPENCV_INCLUDE" ]; then
+    echo "[+] Injecting custom opencv2/geometry headers..."
+    cp -r "$GEOM_SRC/." "$OPENCV_INCLUDE/"
+fi
+
 # 5. Cleanup
 echo "[+] Cleaning up..."
 rm "${TARGET_BASE}/${OPENCV_ZIP}"

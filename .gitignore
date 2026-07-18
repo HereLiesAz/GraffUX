@@ -73,6 +73,6 @@ gha-creds-*.json
 /.claude/
 strangerdanger-494206-082913abfaab.json
 
-# OpenCV SDK is fetched via setup_libs.sh, never committed in GraphiXR
+# OpenCV SDK is fetched via setup_libs.sh, never committed in GraphiXR. Other native support libs
+# (glm headers) ARE committed — only the giant fetched OpenCV tree is excluded.
 core/nativebridge/libs/opencv/
-core/nativebridge/libs/
