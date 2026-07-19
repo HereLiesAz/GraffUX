@@ -1,6 +1,7 @@
 // FILE: feature/editor/src/main/java/com/hereliesaz/graffitixr/feature/editor/EditorScreen.kt
 package com.hereliesaz.graffitixr.feature.editor
 
+import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -26,6 +27,7 @@ import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.PanTool
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -37,8 +39,10 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
@@ -56,6 +60,7 @@ import com.hereliesaz.graffitixr.common.model.EditorPanel
 import com.hereliesaz.graffitixr.common.model.Tool
 import com.hereliesaz.graffitixr.design.detectSmartOverlayGestures
 import com.hereliesaz.graffitixr.design.theme.rememberAppStrings
+import kotlinx.coroutines.launch
 
 /**
  * The full standalone 2D editor screen — the single source of truth hosted by GraffiXR and (later)
@@ -79,6 +84,8 @@ fun EditorScreen(
 ) {
     val uiState by vm.uiState.collectAsState()
     val strings = rememberAppStrings()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     // GraffiXR is a pure 2D editor: force DESIGN mode (EditorViewModel defaults to AR) so the layer
     // render and Design-mode transform gestures apply. Runs once.
@@ -232,6 +239,19 @@ fun EditorScreen(
             onRedo = { vm.onRedoClicked() },
             onSave = { vm.saveProject() },
             onExport = { vm.exportImage() },
+            onShare = {
+                // Interop hand-off: composite the design to a content:// Uri and offer it to any app
+                // (e.g. GraffitiXR to project in AR). No-op silently if there's nothing to share.
+                scope.launch {
+                    val uri = vm.exportForShare() ?: return@launch
+                    val send = Intent(Intent.ACTION_SEND).apply {
+                        type = "image/png"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    context.startActivity(Intent.createChooser(send, null))
+                }
+            },
             modifier = Modifier
                 .align(if (uiState.isRightHanded) Alignment.CenterEnd else Alignment.CenterStart)
                 .padding(8.dp)
@@ -262,6 +282,7 @@ private fun EditorToolRail(
     onRedo: () -> Unit,
     onSave: () -> Unit,
     onExport: () -> Unit,
+    onShare: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -283,6 +304,7 @@ private fun EditorToolRail(
         RailButton(Icons.AutoMirrored.Filled.Redo, "Redo", enabled = canRedo, onClick = onRedo)
         RailButton(Icons.Filled.Save, "Save", onClick = onSave)
         RailButton(Icons.Filled.FileDownload, "Export", onClick = onExport)
+        RailButton(Icons.Filled.Share, "Share", onClick = onShare)
     }
 }
 
