@@ -1155,6 +1155,7 @@ class EditorViewModel @Inject constructor(
         saveProject()
     }
     override fun onAdjustClicked() = dispatch(EditorIntent.ToggleAdjustPanel)
+    fun onTransformClicked() = dispatch(EditorIntent.ToggleTransformPanel)
     fun onBalanceClicked() = dispatch(EditorIntent.ToggleColorPanel)
     fun onLayersClicked() = dispatch(EditorIntent.ToggleLayersPanel)
     override fun onDismissPanel() = dispatch(EditorIntent.DismissPanel)
