@@ -115,4 +115,39 @@ class CanvasHitTestTest {
         assertEquals(700f, corners[0].x, 0.01f)
         assertEquals(300f, corners[0].y, 0.01f)
     }
+
+    @Test
+    fun `nearest corner within radius picks the closest handle`() {
+        // corners: TL(300,300) TR(700,300) BR(700,700) BL(300,700)
+        val corners = CanvasHitTest.layerScreenCorners(vlayer("a"), W, H)!!
+        assertEquals(1, CanvasHitTest.nearestCornerIndex(Offset(705f, 305f), corners, 30f)) // TR
+        assertEquals(3, CanvasHitTest.nearestCornerIndex(Offset(295f, 690f), corners, 30f)) // BL
+    }
+
+    @Test
+    fun `nearest corner returns null when nothing is within radius`() {
+        val corners = CanvasHitTest.layerScreenCorners(vlayer("a"), W, H)!!
+        assertNull(CanvasHitTest.nearestCornerIndex(Offset(500f, 500f), corners, 30f)) // centre, far
+    }
+
+    @Test
+    fun `box centre is the average of the corners`() {
+        val bc = CanvasHitTest.boxCenter(CanvasHitTest.layerScreenCorners(vlayer("a"), W, H)!!)
+        assertEquals(500f, bc.x, 0.01f)
+        assertEquals(500f, bc.y, 0.01f)
+    }
+
+    @Test
+    fun `rotation handle sits out beyond the top edge`() {
+        val rot = CanvasHitTest.rotationHandlePos(CanvasHitTest.layerScreenCorners(vlayer("a"), W, H)!!, 50f)!!
+        assertEquals(500f, rot.x, 0.01f) // above the top-edge midpoint (500, 300)
+        assertEquals(250f, rot.y, 0.01f) // 50 px further up
+    }
+
+    @Test
+    fun `angle delta measures signed rotation about the centre`() {
+        val c = Offset(500f, 500f)
+        assertEquals(-90f, CanvasHitTest.angleDeltaDegrees(c, Offset(600f, 500f), Offset(500f, 400f)), 0.01f)
+        assertEquals(90f, CanvasHitTest.angleDeltaDegrees(c, Offset(600f, 500f), Offset(500f, 600f)), 0.01f)
+    }
 }

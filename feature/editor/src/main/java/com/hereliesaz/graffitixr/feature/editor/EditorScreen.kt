@@ -4,6 +4,8 @@ package com.hereliesaz.graffitixr.feature.editor
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,8 +33,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
-import com.hereliesaz.graffitixr.common.model.EditorMode
 import com.hereliesaz.graffitixr.common.model.Layer
 import com.hereliesaz.graffitixr.common.model.ShapeKind
 import com.hereliesaz.graffitixr.common.model.Tool
@@ -186,6 +188,21 @@ fun EditorScreen(
             SelectionOverlay(activeLayer = activeLayer, modifier = Modifier.fillMaxSize())
         }
 
+        // 2c. Resize handles — dragging a corner scales the active layer about its centre (a
+        // single-finger "pinch", reusing onTransformGesture). Sits ABOVE the pan-gesture box so a
+        // drag that starts on a handle is claimed here; a drag elsewhere isn't consumed, so panning
+        // still works. Only when a layer is active and no brush tool is selected.
+        if (uiState.activeTool == Tool.NONE && activeLayer != null && !activeLayerLocked) {
+            SelectionHandles(
+                activeLayer = activeLayer,
+                onGestureStart = { vm.onGestureStart() },
+                onResize = { zoom -> vm.onTransformGesture(Offset.Zero, zoom, 0f) },
+                onRotate = { deg -> vm.onTransformGesture(Offset.Zero, 1f, deg) },
+                onGestureEnd = { vm.onGestureEnd() },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+
         // 3. Brush touch layer — full-screen, in true screen coordinates (no graphicsLayer here; the
         // layer render already applies the transform, and EditorViewModel.onStrokePoint maps screen
         // space back to bitmap pixels). Active only when a tool is selected on an unlocked layer.
@@ -235,6 +252,81 @@ private fun SelectionOverlay(activeLayer: Layer?, modifier: Modifier = Modifier)
         val color = Color(0xFF00E5FF) // cyan, matches the rail accent
         for (i in corners.indices) {
             drawLine(color, corners[i], corners[(i + 1) % corners.size], strokeWidth = stroke)
+        }
+    }
+}
+
+/**
+ * Interactive resize handles: draws a dot at each corner of the active layer's bounding box, and a
+ * drag that begins on a corner scales the layer about its centre. The scale is applied as an
+ * incremental "zoom" through the existing [EditorViewModel.onTransformGesture] path (single-finger
+ * pinch), so it reuses the proven transform + linked-group + history/persistence lifecycle
+ * ([onResizeStart]/[onResizeEnd] wrap it). A drag that does NOT start on a handle is left
+ * unconsumed, so the pan-gesture layer below still handles it.
+ *
+ * Device-tuning note: the handle touch radius and the render-transform pivot basis (shared with
+ * [CanvasHitTest]) are derived, not yet verified on a device.
+ */
+@Composable
+private fun SelectionHandles(
+    activeLayer: Layer,
+    onGestureStart: () -> Unit,
+    onResize: (zoom: Float) -> Unit,
+    onRotate: (degrees: Float) -> Unit,
+    onGestureEnd: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val density = LocalDensity.current
+    val handleRadiusPx = with(density) { 22.dp.toPx() }
+    val rotationArmPx = with(density) { 36.dp.toPx() }
+    Canvas(
+        modifier = modifier.pointerInput(activeLayer.id) {
+            awaitEachGesture {
+                val corners = CanvasHitTest.layerScreenCorners(
+                    activeLayer, size.width.toFloat(), size.height.toFloat(),
+                ) ?: return@awaitEachGesture
+                val down = awaitFirstDown(requireUnconsumed = true)
+                val pivot = CanvasHitTest.boxCenter(corners)
+                val rotHandle = CanvasHitTest.rotationHandlePos(corners, rotationArmPx)
+
+                // Rotation handle takes priority over corners; a drag that starts on neither is left
+                // unconsumed so the pan layer below still handles it.
+                val onRotationHandle =
+                    rotHandle != null && (down.position - rotHandle).getDistance() <= handleRadiusPx
+                val onCorner = CanvasHitTest.nearestCornerIndex(down.position, corners, handleRadiusPx) != null
+                if (!onRotationHandle && !onCorner) return@awaitEachGesture
+
+                down.consume()
+                onGestureStart()
+                var prevPos = down.position
+                var prevDist = (down.position - pivot).getDistance().coerceAtLeast(1f)
+                while (true) {
+                    val event = awaitPointerEvent()
+                    val change = event.changes.firstOrNull() ?: break
+                    if (!change.pressed) break
+                    if (onRotationHandle) {
+                        onRotate(CanvasHitTest.angleDeltaDegrees(pivot, prevPos, change.position))
+                    } else {
+                        val curDist = (change.position - pivot).getDistance().coerceAtLeast(1f)
+                        onResize(curDist / prevDist)
+                        prevDist = curDist
+                    }
+                    prevPos = change.position
+                    change.consume()
+                }
+                onGestureEnd()
+            }
+        },
+    ) {
+        val corners = CanvasHitTest.layerScreenCorners(activeLayer, size.width, size.height) ?: return@Canvas
+        val accent = Color(0xFF00E5FF)
+        val r = 6.dp.toPx()
+        corners.forEach { drawCircle(accent, radius = r, center = it) }
+        // Rotation handle: a stem from the top-edge midpoint out to a dot.
+        CanvasHitTest.rotationHandlePos(corners, 36.dp.toPx())?.let { rot ->
+            val topMid = (corners[0] + corners[1]) / 2f
+            drawLine(accent, topMid, rot, strokeWidth = 2.dp.toPx())
+            drawCircle(accent, radius = r, center = rot)
         }
     }
 }
