@@ -144,6 +144,10 @@ private fun GraffuxApp(sharedImageUri: Uri?) {
                         val send = Intent(Intent.ACTION_SEND).apply {
                             type = "image/png"
                             putExtra(Intent.EXTRA_STREAM, uri)
+                            // Carry the URI in ClipData too: FLAG_GRANT_READ_URI_PERMISSION grants
+                            // against the intent's data/ClipData, not EXTRA_STREAM, so the receiver
+                            // can otherwise be handed a URI it lacks read access to.
+                            clipData = android.content.ClipData.newRawUri(null, uri)
                             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                         }
                         context.startActivity(Intent.createChooser(send, null))
@@ -213,7 +217,7 @@ private fun AzNavHostScope.ConfigureRailItems(
     azRailSubItem(
         id = "design.move",
         hostId = "host.design",
-        text = "Move",
+        text = navStrings.move,
         color = if (uiState.activeTool == Tool.NONE) Cyan else navItemColor,
         shape = AzButtonShape.NONE
     ) {
@@ -222,7 +226,7 @@ private fun AzNavHostScope.ConfigureRailItems(
     azRailSubItem(
         id = "design.brush",
         hostId = "host.design",
-        text = "Brush",
+        text = navStrings.brush,
         color = if (uiState.activeTool == Tool.BRUSH) Cyan else navItemColor,
         shape = AzButtonShape.NONE
     ) {
@@ -231,7 +235,7 @@ private fun AzNavHostScope.ConfigureRailItems(
     azRailSubItem(
         id = "design.colour",
         hostId = "host.design",
-        text = "Colour",
+        text = navStrings.color,
         color = if (uiState.showColorPicker) Cyan else navItemColor,
         shape = AzButtonShape.NONE
     ) {
@@ -262,7 +266,7 @@ private fun AzNavHostScope.ConfigureRailItems(
     azRailSubItem(
         id = "design.undo",
         hostId = "host.design",
-        text = "Undo",
+        text = navStrings.undo,
         color = if (uiState.undoCount > 0) navItemColor else Color.Gray,
         shape = AzButtonShape.NONE
     ) {
@@ -271,7 +275,7 @@ private fun AzNavHostScope.ConfigureRailItems(
     azRailSubItem(
         id = "design.redo",
         hostId = "host.design",
-        text = "Redo",
+        text = navStrings.redo,
         color = if (uiState.redoCount > 0) navItemColor else Color.Gray,
         shape = AzButtonShape.NONE
     ) {
@@ -294,7 +298,7 @@ private fun AzNavHostScope.ConfigureRailItems(
     azRailSubItem(id = "proj.export", hostId = "host.project", text = navStrings.export, color = navItemColor, shape = AzButtonShape.NONE) {
         vm.exportImage()
     }
-    azRailSubItem(id = "proj.share", hostId = "host.project", text = "Share", color = navItemColor, shape = AzButtonShape.NONE) {
+    azRailSubItem(id = "proj.share", hostId = "host.project", text = navStrings.share, color = navItemColor, shape = AzButtonShape.NONE) {
         onShare()
     }
 }
