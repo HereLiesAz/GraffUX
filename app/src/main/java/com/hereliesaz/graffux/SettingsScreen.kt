@@ -1,5 +1,6 @@
 package com.hereliesaz.graffux
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -25,15 +27,16 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hereliesaz.graffitixr.common.model.AppLanguage
 
 /**
@@ -49,9 +52,11 @@ fun SettingsScreen(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val rightHanded by vm.isRightHanded.collectAsState()
-    val imperial by vm.isImperialUnits.collectAsState()
-    val language by vm.language.collectAsState()
+    BackHandler(onBack = onClose)
+
+    val rightHanded by vm.isRightHanded.collectAsStateWithLifecycle()
+    val imperial by vm.isImperialUnits.collectAsStateWithLifecycle()
+    val language by vm.language.collectAsStateWithLifecycle()
 
     Surface(modifier = modifier, color = MaterialTheme.colorScheme.surface) {
         Column(
@@ -110,7 +115,11 @@ private fun SwitchRow(
     onCheckedChange: (Boolean) -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            // Toggle from anywhere on the row (accessibility); the Switch just reflects state.
+            .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange)
+            .padding(vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -122,7 +131,7 @@ private fun SwitchRow(
             )
         }
         Spacer(Modifier.width(16.dp))
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Switch(checked = checked, onCheckedChange = null)
     }
 }
 
