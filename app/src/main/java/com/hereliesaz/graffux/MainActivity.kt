@@ -164,6 +164,14 @@ private fun GraffuxApp(sharedImageUri: Uri?) {
         ActivityResultContracts.OpenDocument()
     ) { uri -> uri?.let { vm.onImportDocument(it) } }
 
+    // Picks an azphalt `.azp` brush package to install (any MIME — .azp reports a generic type).
+    val brushPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri -> uri?.let { vm.installExtensionFromUri(it) } }
+
+    // Installed stamp brushes, reactive so a just-installed one appears in the picker.
+    val brushes by vm.installedBrushes.collectAsState()
+
     // Rail-item colour that stays legible against the current canvas background (mirrors GraffitiXR).
     val navItemColor = remember(uiState.canvasBackground) {
         val bg = uiState.canvasBackground
@@ -191,6 +199,7 @@ private fun GraffuxApp(sharedImageUri: Uri?) {
         ConfigureRailItems(
             vm = vm,
             uiState = uiState,
+            brushes = brushes,
             strings = strings,
             navItemColor = navItemColor,
             onOpenImage = {
@@ -208,6 +217,7 @@ private fun GraffuxApp(sharedImageUri: Uri?) {
             onEditText = { id -> manualEditTextId = id },
             onBackground = { showBgDialog = true },
             onSettings = { showSettings = true },
+            onInstallBrush = { brushPicker.launch(arrayOf("*/*")) },
             onShare = {
                 // Interop hand-off: composite the design to a content:// Uri and offer it to any app
                 // (e.g. GraffitiXR to project in AR). No-op silently if there's nothing to share.
@@ -459,6 +469,7 @@ private fun BrushSizePad(vm: EditorViewModel) {
 private fun AzNavHostScope.ConfigureRailItems(
     vm: EditorViewModel,
     uiState: EditorUiState,
+    brushes: List<Pair<String, String>>,
     strings: AppStrings,
     navItemColor: Color,
     onOpenImage: () -> Unit,
@@ -473,6 +484,7 @@ private fun AzNavHostScope.ConfigureRailItems(
     onEditText: (String) -> Unit,
     onBackground: () -> Unit,
     onSettings: () -> Unit,
+    onInstallBrush: () -> Unit,
 ) {
     val navStrings = strings.nav
 
@@ -510,9 +522,12 @@ private fun AzNavHostScope.ConfigureRailItems(
         color = if (uiState.activePanel == EditorPanel.LAYERS) Cyan else navItemColor,
         onClick = { vm.onLayersClicked() },
     )
-    // Installed azphalt stamp brushes (if any) + the built-in "Round". Absent until a brush .azp is
-    // installed, so this adds nothing to the rail today. Selecting one switches the Size pad to size/flow.
-    val brushes = vm.installedBrushes()
+    // Installed azphalt stamp brushes + the built-in "Round", and an item to install a brush .azp.
+    // Selecting a stamp brush switches the Size pad's second axis to flow.
+    azRailSubItem(
+        id = "brush.install", hostId = "grp.design", text = "Install brush…", shape = AzButtonShape.NONE,
+        onClick = { onInstallBrush() },
+    )
     if (brushes.isNotEmpty()) {
         azRailSubItem(
             id = "brush.round", hostId = "grp.design", text = "Round", shape = AzButtonShape.NONE,
