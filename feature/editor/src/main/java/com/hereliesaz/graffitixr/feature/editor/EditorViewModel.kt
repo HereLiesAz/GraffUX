@@ -2414,6 +2414,34 @@ class EditorViewModel @Inject constructor(
         dispatch(EditorIntent.SetBrushFeathering(amount))
     }
 
+    /** Flow (0..1) for the active azphalt stamp brush — per-dab build-up. No-op for the round brush. */
+    fun setBrushFlow(amount: Float) {
+        dispatch(EditorIntent.SetBrushFlow(amount))
+    }
+
+    /** Installed azphalt brush extensions available to paint with (id + display name). */
+    fun installedBrushes(): List<Pair<String, String>> =
+        extensionRepository.installedBrushes().map { it.id to it.manifest.name }
+
+    /**
+     * Select an installed azphalt stamp brush by extension [id], or pass null to return to the built-in
+     * round brush. Loads the brush's declarative definition to confirm it parses (rendering wiring is a
+     * follow-up); the active-brush name drives the UI and switches the size control's second axis to flow.
+     */
+    fun selectBrushExtension(id: String?) {
+        if (id == null) {
+            dispatch(EditorIntent.SetActiveBrush(null))
+            return
+        }
+        val brush = extensionRepository.loadBrush(id)
+        if (brush == null) {
+            Toast.makeText(context, "Couldn't load that brush — it may be missing or corrupt", Toast.LENGTH_SHORT).show()
+            return
+        }
+        dispatch(EditorIntent.SetActiveBrush(brush.name))
+        setActiveTool(Tool.BRUSH)
+    }
+
     override fun setActiveColor(color: Color) {
         dispatch(EditorIntent.SetActiveColor(color))
         // If a vector layer is active, recolour its shapes: fill for rect/ellipse, stroke for lines.

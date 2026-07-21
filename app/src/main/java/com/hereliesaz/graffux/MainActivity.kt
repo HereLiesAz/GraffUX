@@ -399,23 +399,35 @@ private fun BrushSizePad(vm: EditorViewModel) {
                         vm.setBrushSize((cur - drag.y * 0.5f).coerceIn(1f, maxPx))
                     }
                     if (drag.x != 0f) {
-                        // Horizontal → feathering (hardness). Right softens.
-                        val cur = vm.uiState.value.brushFeathering
-                        vm.setBrushFeathering((cur + drag.x * 0.005f).coerceIn(0f, 1f))
+                        // Horizontal → hardness for the built-in brush, or FLOW for an azphalt stamp
+                        // brush (right increases both). Same feel, different parameter.
+                        if (vm.uiState.value.activeBrushName != null) {
+                            val cur = vm.uiState.value.brushFlow
+                            vm.setBrushFlow((cur + drag.x * 0.005f).coerceIn(0f, 1f))
+                        } else {
+                            val cur = vm.uiState.value.brushFeathering
+                            vm.setBrushFeathering((cur + drag.x * 0.005f).coerceIn(0f, 1f))
+                        }
                     }
                 }
             },
         contentAlignment = Alignment.Center,
     ) {
         val maxPx = maxOf(itemPx, 1f)
+        val isStamp = state.activeBrushName != null
         val feather = state.brushFeathering
-        // Halo = the full brush diameter; core = the hard centre, shrinking as feathering rises.
+        // Built-in brush: a hard core that shrinks (and gains a soft halo) as feathering rises.
+        // Stamp brush: a solid core whose opacity is the flow value.
         val haloDp = with(density) { state.brushSize.coerceIn(1f, maxPx).toDp() }
-        val coreDp = with(density) { (state.brushSize * (1f - feather * 0.7f)).coerceIn(2f, maxPx).toDp() }
-        if (feather > 0.05f) {
+        val coreDp = with(density) {
+            (if (isStamp) state.brushSize else state.brushSize * (1f - feather * 0.7f))
+                .coerceIn(2f, maxPx).toDp()
+        }
+        if (!isStamp && feather > 0.05f) {
             Box(Modifier.size(haloDp).background(Cyan.copy(alpha = 0.3f), CircleShape))
         }
-        Box(Modifier.size(coreDp).background(Cyan, CircleShape))
+        val coreAlpha = if (isStamp) state.brushFlow.coerceIn(0.08f, 1f) else 1f
+        Box(Modifier.size(coreDp).background(Cyan.copy(alpha = coreAlpha), CircleShape))
     }
 }
 
@@ -454,7 +466,9 @@ private fun AzNavHostScope.ConfigureRailItems(
         initiallyExpanded = true,
     )
     azRailSubItem(
-        id = "tool.brush", hostId = "grp.design", text = navStrings.brush, shape = AzButtonShape.NONE,
+        // Label reflects the selected brush (an azphalt stamp brush's name, or "Brush" for the round one).
+        id = "tool.brush", hostId = "grp.design", text = uiState.activeBrushName ?: navStrings.brush,
+        shape = AzButtonShape.NONE,
         color = if (uiState.activeTool == Tool.BRUSH) Cyan else navItemColor,
         // Toggle: tapping the active brush returns to no-tool (selection/transform) — Move's old job.
         onClick = { vm.setActiveTool(if (uiState.activeTool == Tool.BRUSH) Tool.NONE else Tool.BRUSH) },
@@ -480,6 +494,23 @@ private fun AzNavHostScope.ConfigureRailItems(
         color = if (uiState.activePanel == EditorPanel.LAYERS) Cyan else navItemColor,
         onClick = { vm.onLayersClicked() },
     )
+    // Installed azphalt stamp brushes (if any) + the built-in "Round". Absent until a brush .azp is
+    // installed, so this adds nothing to the rail today. Selecting one switches the Size pad to size/flow.
+    val brushes = vm.installedBrushes()
+    if (brushes.isNotEmpty()) {
+        azRailSubItem(
+            id = "brush.round", hostId = "grp.design", text = "Round", shape = AzButtonShape.NONE,
+            color = if (uiState.activeBrushName == null) Cyan else navItemColor,
+            onClick = { vm.selectBrushExtension(null) },
+        )
+        brushes.forEach { (id, name) ->
+            azRailSubItem(
+                id = "brush.$id", hostId = "grp.design", text = name, shape = AzButtonShape.NONE,
+                color = if (uiState.activeBrushName == name) Cyan else navItemColor,
+                onClick = { vm.selectBrushExtension(id) },
+            )
+        }
+    }
 
     // ── Project (file actions) ────────────────────────────────────────────────────────────────────
     azRailHostItem(id = "grp.project", text = "Project", content = Icons.Filled.FolderOpen, color = navItemColor)
