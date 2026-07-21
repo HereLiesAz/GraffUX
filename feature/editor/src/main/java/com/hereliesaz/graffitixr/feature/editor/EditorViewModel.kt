@@ -28,6 +28,7 @@ import com.hereliesaz.graffitixr.common.model.*
 import com.hereliesaz.graffitixr.common.util.ImageUtils
 import com.hereliesaz.graffitixr.common.util.computeAutoTune
 import com.hereliesaz.graffitixr.common.util.decodeBoundedBitmap
+import com.hereliesaz.graffitixr.common.azphalt.BrushStamps
 import com.hereliesaz.graffitixr.common.azphalt.applyCubeLut
 import com.hereliesaz.graffitixr.common.util.imageStats
 import com.hereliesaz.graffitixr.common.util.saveBitmapToGallery
@@ -202,6 +203,15 @@ class EditorViewModel @Inject constructor(
     // The selected azphalt stamp brush's parsed definition (null = built-in round brush). Set by
     // selectBrushExtension; read at stroke-commit to route through StampBrushRenderer.
     private var activeStampBrush: com.hereliesaz.graffitixr.common.azphalt.AzphaltBrush? = null
+
+    // Live stamp-stroke preview state — valid only between onStrokeStart and onStrokeEnd for a stamp
+    // brush. Dabs are stamped incrementally onto [stampLiveBitmap]; [stampSeed] fixes the jitter so the
+    // preview, the commit, and history replay all render identically.
+    private var stampLiveBitmap: Bitmap? = null
+    private var stampLiveCanvas: Canvas? = null
+    private var stampStampedCount: Int = 0
+    private var stampSeed: Long = 0L
+    private var stampBrushForStroke: com.hereliesaz.graffitixr.common.azphalt.AzphaltBrush? = null
 
     init {
         viewModelScope.launch(dispatchers.main) {
@@ -2020,10 +2030,32 @@ class EditorViewModel @Inject constructor(
             return
         }
 
-        if (activeStampBrush != null && state.activeTool == Tool.BRUSH) {
-            // Azphalt stamp brush: no live incremental preview (yet) — the transform is captured above
-            // and onStrokePoint keeps collecting points; onStrokeEnd rasterizes the whole stroke via
-            // StampBrushRenderer. Skip the round-brush working-bitmap setup entirely.
+        val stampBrush = activeStampBrush
+        if (stampBrush != null && state.activeTool == Tool.BRUSH) {
+            // Azphalt stamp brush: stamp dabs incrementally onto a working copy for a live preview.
+            // Fix the jitter seed now so the preview, the commit, and history replay all match.
+            stampBrushForStroke = stampBrush
+            stampSeed = System.nanoTime()
+            stampStampedCount = 0
+            stampLiveBitmap = null
+            stampLiveCanvas = null
+            viewModelScope.launch(dispatchers.default) {
+                val work = originalBitmap.copy(Bitmap.Config.ARGB_8888, true) ?: return@launch
+                withContext(dispatchers.main) {
+                    // Only adopt if this is still the in-flight stamp stroke (guard a fast restart).
+                    if (stampBrushForStroke === stampBrush && strokeLayerId == layerId) {
+                        stampLiveBitmap = work
+                        stampLiveCanvas = Canvas(work)
+                        _uiState.update {
+                            it.copy(
+                                liveStrokeLayerId = layerId,
+                                liveStrokeBitmap = work,
+                                liveStrokeVersion = it.liveStrokeVersion + 1,
+                            )
+                        }
+                    }
+                }
+            }
             return
         }
 
@@ -2137,6 +2169,34 @@ class EditorViewModel @Inject constructor(
             return
         }
 
+        val stampBrush = stampBrushForStroke
+        if (stampBrush != null) {
+            // Live stamp preview: stamp only the newly-added dabs. BrushStamps.dabs grows a stable
+            // prefix, so re-drawing dabs beyond the count already stamped matches a full re-render.
+            val canvas = stampLiveCanvas ?: return          // copy not ready yet; points still collected
+            val work = stampLiveBitmap ?: return
+            val all = snapshotStrokePoints()
+            val mapped = ImageProcessor.mapScreenToBitmap(
+                all, strokeCanvasW, strokeCanvasH, work.width, work.height,
+                strokeLayerScale, strokeLayerOffset, strokeLayerRotationZ
+            )
+            val brushScale = ImageProcessor.screenToBitmapScale(
+                strokeCanvasW, strokeCanvasH, work.width, work.height, strokeLayerScale
+            )
+            val pts = ArrayList<Float>(mapped.size * 2)
+            mapped.forEach { pts.add(it.x); pts.add(it.y) }
+            val dabs = BrushStamps.dabs(pts, _uiState.value.brushSize * brushScale, stampBrush, stampSeed)
+            if (dabs.size > stampStampedCount) {
+                StampBrushRenderer.paintDabs(
+                    canvas, dabs.subList(stampStampedCount, dabs.size), stampBrush,
+                    _uiState.value.activeColor.toArgb(), _uiState.value.brushFlow,
+                )
+                stampStampedCount = dabs.size
+                _uiState.update { it.copy(liveStrokeVersion = it.liveStrokeVersion + 1) }
+            }
+            return
+        }
+
         val canvas = strokeWorkingCanvas ?: return
         val paint = strokePaint ?: return
         val prev = strokePrevBitmapPoint ?: return
@@ -2169,7 +2229,9 @@ class EditorViewModel @Inject constructor(
         val capturedOffset = strokeLayerOffset
         val capturedRotationZ = strokeLayerRotationZ
 
-        val stampBrush = activeStampBrush
+        // Use the brush the stroke was actually drawn with (captured at start), not the current
+        // selection, so the commit matches the live preview even if selection somehow changed.
+        val stampBrush = stampBrushForStroke
         if (stampBrush != null && state.activeTool == Tool.BRUSH) {
             commitStampStroke(
                 state, layer, layerId, points, canvasW, canvasH,
@@ -2405,7 +2467,8 @@ class EditorViewModel @Inject constructor(
             layerRotationZ = rotationZ,
             stampBrush = brush,
             flow = flow,
-            seed = points.hashCode().toLong(),
+            // Reuse the live-preview seed so the committed pixels match what was previewed (no flash).
+            seed = stampSeed,
         )
         layerStore.addStroke(layerId, command)
         history.pushDraw(layerId, command)
@@ -2424,7 +2487,11 @@ class EditorViewModel @Inject constructor(
             )
             withContext(dispatchers.main) {
                 _uiState.update { s ->
-                    s.copy(layers = s.layers.map { if (it.id == layerId) it.copy(bitmap = target) else it })
+                    s.copy(
+                        layers = s.layers.map { if (it.id == layerId) it.copy(bitmap = target) else it },
+                        liveStrokeLayerId = null,
+                        liveStrokeBitmap = null,
+                    )
                 }
                 scheduleDiskSave(layerId, target, layer.uri)
             }
@@ -2448,6 +2515,11 @@ class EditorViewModel @Inject constructor(
         liquifyJob?.cancel()
         liquifyJob = null
         liquifyOriginalBitmap = null
+
+        stampLiveBitmap = null
+        stampLiveCanvas = null
+        stampStampedCount = 0
+        stampBrushForStroke = null
     }
 
     private fun buildStrokePaint(tool: Tool, argbColor: Int, brushSize: Float, feathering: Float): Paint =
