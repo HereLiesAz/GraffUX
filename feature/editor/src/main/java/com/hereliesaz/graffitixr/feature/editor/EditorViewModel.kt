@@ -529,6 +529,20 @@ class EditorViewModel @Inject constructor(
                 return@launch
             }
 
+            // Procreate: import the embedded composite as a single flattened layer (per-layer chunk
+            // decode is a later phase).
+            if (format == DocumentFormat.PROCREATE) {
+                val composite = extractProcreateComposite(bytes)
+                if (composite != null) {
+                    importSingleBitmap(composite, name?.substringBeforeLast('.') ?: "Procreate")
+                } else {
+                    withContext(dispatchers.main) {
+                        toast("Couldn't read that Procreate file (no embedded preview).")
+                    }
+                }
+                return@launch
+            }
+
             withContext(dispatchers.main) {
                 when (format) {
                     DocumentFormat.IMAGE -> onAddLayer(uri)
@@ -536,12 +550,36 @@ class EditorViewModel @Inject constructor(
                         toast("This PSD uses a mode that isn't supported yet (only 8-bit RGB).")
                     DocumentFormat.CANVA ->
                         toast("Canva files aren't stored locally — export to PNG or PDF and open that.")
-                    DocumentFormat.PROCREATE ->
-                        toast("Opening Procreate files is coming soon.")
                     else -> toast("That file type isn't supported.")
                 }
             }
         }
+    }
+
+    /**
+     * Pulls the flattened composite out of a Procreate `.procreate` archive (a ZIP). Procreate keeps a
+     * full-canvas preview at `QuickLook/Thumbnail.png`; we decode that. Returns null if the archive has
+     * no such preview or isn't readable. (True per-layer import needs decoding Procreate's proprietary
+     * tiled/compressed layer chunks — a later phase.) Runs off the main thread.
+     */
+    private fun extractProcreateComposite(bytes: ByteArray): Bitmap? = try {
+        java.util.zip.ZipInputStream(java.io.ByteArrayInputStream(bytes)).use { zip ->
+            var found: Bitmap? = null
+            var entry = zip.nextEntry
+            while (entry != null) {
+                if (!entry.isDirectory &&
+                    entry.name.substringAfterLast('/').equals("Thumbnail.png", ignoreCase = true)
+                ) {
+                    val data = zip.readBytes()
+                    found = android.graphics.BitmapFactory.decodeByteArray(data, 0, data.size)
+                    break
+                }
+                entry = zip.nextEntry
+            }
+            found
+        }
+    } catch (e: Exception) {
+        null
     }
 
     /**
