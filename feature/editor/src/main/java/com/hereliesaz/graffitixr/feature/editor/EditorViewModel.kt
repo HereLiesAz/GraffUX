@@ -36,6 +36,7 @@ import com.hereliesaz.graffitixr.domain.repository.SettingsRepository
 import com.hereliesaz.graffitixr.nativebridge.SlamManager
 import com.hereliesaz.graffitixr.data.ProjectManager
 import com.hereliesaz.graffitixr.feature.editor.export.ExportManager
+import com.hereliesaz.graffitixr.feature.editor.export.artboardRect
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -834,8 +835,10 @@ class EditorViewModel @Inject constructor(
             if (wy < minY) minY = wy
             if (wy > maxY) maxY = wy
         }
+        // Simplify the raw per-touch capture into a tidy path (tolerance ~2 screen px in world units).
+        val simplified = PathSimplify.rdp(world, 2f / st.viewportZoom.coerceAtLeast(0.01f))
         val shape = VectorPaths.pathShape(
-            points = world,
+            points = simplified,
             closed = false,
             strokeArgb = st.activeColor.toArgb().toLong() and 0xFFFFFFFFL,
             strokeWidth = st.brushSize.coerceAtLeast(1f),
@@ -853,6 +856,32 @@ class EditorViewModel @Inject constructor(
         // AddLayer resets the tool to NONE; keep the pen active so strokes can be drawn continuously.
         dispatch(EditorIntent.SetActiveTool(Tool.PEN))
         opEmitter.emit(Op.LayerAdd(newLayer))
+        saveProject()
+    }
+
+    /**
+     * Aligns the active layer to the artboard by [mode] (left / centre / right / top / middle /
+     * bottom). Computes the layer's world bounding box and the artboard rect, then shifts the layer's
+     * offset by the pure [AlignOps] delta. A no-op if there's no active layer or it's already aligned.
+     */
+    fun alignActiveLayer(mode: AlignMode) {
+        val st = _uiState.value
+        val layer = st.layers.find { it.id == st.activeLayerId } ?: return
+        val metrics = context.resources.displayMetrics
+        val cw = metrics.widthPixels.toFloat()
+        val ch = metrics.heightPixels.toFloat()
+        if (cw <= 0f || ch <= 0f) return
+        // Layer bounding box in world space (identity camera), matching the artboard's world rect.
+        val corners = CanvasHitTest.layerScreenCorners(layer, cw, ch) ?: return
+        val box = floatArrayOf(
+            corners.minOf { it.x }, corners.minOf { it.y },
+            corners.maxOf { it.x }, corners.maxOf { it.y },
+        )
+        val artboard = artboardRect(cw.toInt(), ch.toInt(), st.documentWidth, st.documentHeight)
+        val (dx, dy) = AlignOps.delta(mode, box, artboard)
+        if (dx == 0f && dy == 0f) return
+        pushHistory()
+        dispatch(EditorIntent.AddOffset(Offset(dx, dy)))
         saveProject()
     }
 
@@ -1492,7 +1521,7 @@ class EditorViewModel @Inject constructor(
         }
     }
 
-    fun onTransformGesture(pan: Offset, zoom: Float, rotationDelta: Float) {
+    fun onTransformGesture(pan: Offset, zoom: Float, rotationDelta: Float, canvasW: Float = 0f, canvasH: Float = 0f) {
         val activeId = _uiState.value.activeLayerId ?: return
         val axis = _uiState.value.activeRotationAxis
         updateLinkedGroup(activeId) { layer ->
@@ -1500,6 +1529,36 @@ class EditorViewModel @Inject constructor(
             val ry = if (axis == RotationAxis.Y) layer.rotationY + rotationDelta else layer.rotationY
             val rz = if (axis == RotationAxis.Z) layer.rotationZ + rotationDelta else layer.rotationZ
             layer.copy(scale = layer.scale * zoom, offset = layer.offset + pan, rotationX = rx, rotationY = ry, rotationZ = rz)
+        }
+        // Snap-to-guides only on a pure move (not resize/rotate) and only when the canvas size is known.
+        if (canvasW > 0f && zoom == 1f && rotationDelta == 0f) applyMoveSnap(activeId, canvasW, canvasH)
+    }
+
+    /** Snaps the active layer's edges/centre to the artboard and other layers, shifting the linked
+     *  group by the snap delta and publishing the active guide lines (world space) for the UI. */
+    private fun applyMoveSnap(activeId: String, cw: Float, ch: Float) {
+        val st = _uiState.value
+        val layer = st.layers.find { it.id == activeId }
+        val corners = layer?.let { CanvasHitTest.layerScreenCorners(it, cw, ch) }
+        if (corners == null) {
+            if (st.snapGuidesX.isNotEmpty() || st.snapGuidesY.isNotEmpty()) {
+                dispatch(EditorIntent.SetSnapGuides(emptyList(), emptyList()))
+            }
+            return
+        }
+        fun bbox(c: List<Offset>) = floatArrayOf(c.minOf { it.x }, c.minOf { it.y }, c.maxOf { it.x }, c.maxOf { it.y })
+        val artboard = artboardRect(cw.toInt(), ch.toInt(), st.documentWidth, st.documentHeight)
+        val others = st.layers.filter { it.id != activeId && it.isVisible }
+            .mapNotNull { l -> CanvasHitTest.layerScreenCorners(l, cw, ch)?.let(::bbox) }
+        val (gx, gy) = SnapEngine.guidesFrom(artboard, others)
+        val threshold = 12f / st.viewportZoom.coerceAtLeast(0.01f)
+        val res = SnapEngine.snap(bbox(corners), gx, gy, threshold)
+        if (res.dx != 0f || res.dy != 0f) {
+            updateLinkedGroup(activeId) { it.copy(offset = it.offset + Offset(res.dx, res.dy)) }
+        }
+        // Avoid a state churn every drag frame: only publish when the guide set actually changes.
+        if (res.guidesX != st.snapGuidesX || res.guidesY != st.snapGuidesY) {
+            dispatch(EditorIntent.SetSnapGuides(res.guidesX, res.guidesY))
         }
     }
 
@@ -1540,6 +1599,9 @@ class EditorViewModel @Inject constructor(
     override fun onGestureEnd() {
         saveProject()
         dispatch(EditorIntent.SetGestureInProgress(false))
+        if (_uiState.value.snapGuidesX.isNotEmpty() || _uiState.value.snapGuidesY.isNotEmpty()) {
+            dispatch(EditorIntent.SetSnapGuides(emptyList(), emptyList()))
+        }
         // Emit LayerTransform for the active layer. The editor stores transform as
         // scale/offset/rotationX/Y/Z rather than a Matrix, so we encode them in the
         // first 6 slots of a 16-float list (slots 6-15 are zeros).

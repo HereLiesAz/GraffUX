@@ -14,6 +14,8 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Text
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -76,7 +78,9 @@ fun EditorScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(uiState.canvasBackground)
+            // Fixed dark workspace so the artboard (the document, its own fill) reads as a distinct
+            // page rather than blending into an all-black canvas.
+            .background(WorkspaceColor)
     ) {
         // Infinite-canvas camera: pans/zooms the layer stack + artboard together (identity = no-op).
         // Screen-space overlays below (gestures, selection, panels) stay OUTSIDE it, in screen space.
@@ -92,6 +96,14 @@ fun EditorScreen(
                     transformOrigin = TransformOrigin(0f, 0f)
                 }
         ) {
+        // 0. Page — the document's own fill (canvasBackground) drawn at the artboard, behind layers,
+        // so the empty document is a visible page on the darker workspace.
+        ArtboardPage(
+            documentWidth = uiState.documentWidth,
+            documentHeight = uiState.documentHeight,
+            color = uiState.canvasBackground,
+            modifier = Modifier.fillMaxSize(),
+        )
         // 1. Layer stack render.
         uiState.layers.filter { it.isVisible }.forEach { layer ->
             key(layer.id) {
@@ -167,6 +179,16 @@ fun EditorScreen(
             documentHeight = uiState.documentHeight,
             modifier = Modifier.fillMaxSize(),
         )
+
+        // 1c. Snap guides — world-space alignment lines shown while dragging a layer. Drawn inside the
+        // camera container so they pan/zoom/rotate with the workspace. Purely visual.
+        if (uiState.snapGuidesX.isNotEmpty() || uiState.snapGuidesY.isNotEmpty()) {
+            SnapGuides(
+                guidesX = uiState.snapGuidesX,
+                guidesY = uiState.snapGuidesY,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
         } // end infinite-canvas camera container
 
         // 2. Transform / tap gestures — only when no brush tool is active.
@@ -222,7 +244,7 @@ fun EditorScreen(
                                     }
                                     startOnActiveLayer -> {
                                         if (!movingObject) { vm.onGestureStart(); movingObject = true }
-                                        vm.onTransformGesture(pan, 1f, 0f)
+                                        vm.onTransformGesture(pan, 1f, 0f, w, h)
                                     }
                                     else -> {
                                         if (centroid != Offset.Unspecified) vm.onViewportPanZoom(pan, 1f, centroid)
@@ -306,6 +328,17 @@ fun EditorScreen(
             strings = strings,
             isCapturingTarget = false
         )
+
+        // 4b. Empty-state hint — guide the user to add content when the document is blank.
+        if (uiState.layers.isEmpty() && !uiState.isLoading) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    text = "Tap the icon, then File → New or Open\nto start your first layer.",
+                    color = Color.White.copy(alpha = 0.55f),
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
 
         // 5. Loading indicator.
         if (uiState.isLoading) {
@@ -470,9 +503,51 @@ private fun PenCanvas(
 }
 
 /**
- * Draws the artboard: the centered, aspect-fit rectangle matching the document's [documentWidth] :
- * [documentHeight] ratio, with the surrounding workspace dimmed and the bounds outlined. Non-
- * interactive (a plain [Canvas] with no pointer input), so gestures and drawing below are untouched.
+ * Draws the active snap guide lines — world-space alignment lines shown while dragging a layer, in
+ * the camera container's coordinate space: full-height verticals at [guidesX], full-width horizontals
+ * at [guidesY]. Non-interactive.
+ */
+@Composable
+private fun SnapGuides(guidesX: List<Float>, guidesY: List<Float>, modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val color = Color(0xFFFF3D7F) // magenta, distinct from the cyan selection accent
+        val stroke = 1.dp.toPx()
+        guidesX.forEach { x -> drawLine(color, Offset(x, 0f), Offset(x, size.height), strokeWidth = stroke) }
+        guidesY.forEach { y -> drawLine(color, Offset(0f, y), Offset(size.width, y), strokeWidth = stroke) }
+    }
+}
+
+/** The fixed dark workspace behind the artboard, so the document reads as a distinct page. */
+private val WorkspaceColor = Color(0xFF2B2B2B)
+
+/** The centered, aspect-fit artboard rectangle for a [docW]×[docH] document within a [w]×[h] canvas,
+ *  as `[left, top, width, height]`. Shared by the page fill and the frame outline. */
+private fun artboardRectIn(w: Float, h: Float, docW: Int, docH: Int): FloatArray {
+    val docAspect = docW.toFloat() / docH.toFloat()
+    val canvasAspect = w / h
+    val rectW: Float
+    val rectH: Float
+    if (docAspect > canvasAspect) { rectW = w; rectH = w / docAspect } else { rectH = h; rectW = h * docAspect }
+    return floatArrayOf((w - rectW) / 2f, (h - rectH) / 2f, rectW, rectH)
+}
+
+/**
+ * Fills the artboard with the document's own [color] (canvasBackground), behind the layers — so an
+ * empty document shows up as a page on the darker workspace instead of blending into black.
+ */
+@Composable
+private fun ArtboardPage(documentWidth: Int, documentHeight: Int, color: Color, modifier: Modifier = Modifier) {
+    if (documentWidth <= 0 || documentHeight <= 0) return
+    Canvas(modifier) {
+        val r = artboardRectIn(size.width, size.height, documentWidth, documentHeight)
+        drawRect(color, topLeft = Offset(r[0], r[1]), size = Size(r[2], r[3]))
+    }
+}
+
+/**
+ * Outlines the artboard (the document bounds) over the layer stack, so the export region is always
+ * visible. The page fill ([ArtboardPage]) + the [WorkspaceColor] workspace provide the contrast, so
+ * this is just a crisp border now. Non-interactive.
  */
 @Composable
 private fun ArtboardFrame(
@@ -481,29 +556,10 @@ private fun ArtboardFrame(
     modifier: Modifier = Modifier,
 ) {
     if (documentWidth <= 0 || documentHeight <= 0) return
-    val scrim = Color.Black.copy(alpha = 0.5f)
-    val border = Color.White.copy(alpha = 0.7f)
+    val border = Color.White.copy(alpha = 0.85f)
     Canvas(modifier) {
-        val docAspect = documentWidth.toFloat() / documentHeight.toFloat()
-        val canvasAspect = size.width / size.height
-        val rectW: Float
-        val rectH: Float
-        if (docAspect > canvasAspect) {
-            rectW = size.width
-            rectH = size.width / docAspect
-        } else {
-            rectH = size.height
-            rectW = size.height * docAspect
-        }
-        val left = (size.width - rectW) / 2f
-        val top = (size.height - rectH) / 2f
-        // Scrim bands around the artboard (top / bottom / left / right).
-        if (top > 0f) drawRect(scrim, Offset(0f, 0f), Size(size.width, top))
-        if (top + rectH < size.height) drawRect(scrim, Offset(0f, top + rectH), Size(size.width, size.height - top - rectH))
-        if (left > 0f) drawRect(scrim, Offset(0f, top), Size(left, rectH))
-        if (left + rectW < size.width) drawRect(scrim, Offset(left + rectW, top), Size(size.width - left - rectW, rectH))
-        // Document outline.
-        drawRect(color = border, topLeft = Offset(left, top), size = Size(rectW, rectH), style = Stroke(width = 2f))
+        val r = artboardRectIn(size.width, size.height, documentWidth, documentHeight)
+        drawRect(color = border, topLeft = Offset(r[0], r[1]), size = Size(r[2], r[3]), style = Stroke(width = 2f))
     }
 }
 

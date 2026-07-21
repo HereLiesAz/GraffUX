@@ -75,6 +75,8 @@ internal sealed interface EditorIntent {
     data class SetDocumentSize(val width: Int, val height: Int) : EditorIntent
     /** Sets the infinite-canvas camera (pan offset + zoom). */
     data class SetViewport(val offset: Offset, val zoom: Float, val rotation: Float = 0f) : EditorIntent
+    /** Sets the active snap guide lines (world-space) shown while dragging; empty clears them. */
+    data class SetSnapGuides(val x: List<Float>, val y: List<Float>) : EditorIntent
     data object ToggleHandedness : EditorIntent
     data object ToggleDiagOverlay : EditorIntent
     data object FeedbackShown : EditorIntent
