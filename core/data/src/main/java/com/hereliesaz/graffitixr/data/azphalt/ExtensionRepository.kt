@@ -118,6 +118,26 @@ class ExtensionRepository @Inject constructor(
         }
     }
 
+    /**
+     * Verify and unpack an `.azp` from an arbitrary [input] stream — e.g. a user-picked file (a
+     * `content://` Uri the caller opened). Buffers to a bounded temp file first (the same zip-bomb
+     * guard as [install]), then serializes the unpack + rescan. Throws on any integrity/safety failure.
+     * Runs blocking IO — call from a background dispatcher.
+     */
+    fun installFromStream(input: InputStream, nowMs: Long): InstalledExtension {
+        val tempFile = File.createTempFile("azp_", ".azp", context.cacheDir)
+        try {
+            tempFile.outputStream().use { out -> copyBounded(input, out, AzpInstaller.MAX_PACKAGE_BYTES) }
+            return synchronized(lock) {
+                val installed = tempFile.inputStream().use { installer.install(it, nowMs) }
+                _installed.value = scanInstalled()
+                installed
+            }
+        } finally {
+            tempFile.delete()
+        }
+    }
+
     /** Copy [input] to [out], aborting if it exceeds [maxBytes] (a compressed-download zip-bomb guard). */
     private fun copyBounded(input: InputStream, out: OutputStream, maxBytes: Long) {
         val buf = ByteArray(64 * 1024)

@@ -2605,9 +2605,35 @@ class EditorViewModel @Inject constructor(
         dispatch(EditorIntent.SetBrushFlow(amount))
     }
 
-    /** Installed azphalt brush extensions available to paint with (id + display name). */
-    fun installedBrushes(): List<Pair<String, String>> =
-        extensionRepository.installedBrushes().map { it.id to it.manifest.name }
+    /**
+     * Installed azphalt brush extensions available to paint with (id + display name), reactive so a
+     * freshly-installed brush shows up in the picker without a manual refresh.
+     */
+    val installedBrushes: StateFlow<List<Pair<String, String>>> =
+        extensionRepository.installed
+            .map { extensionRepository.installedBrushes().map { ext -> ext.id to ext.manifest.name } }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * Install an azphalt `.azp` package from a user-picked [uri] (a `content://` from the file picker).
+     * Opens the stream, verifies + unpacks off the main thread, and toasts the outcome; the installed
+     * flow ([installedBrushes]) updates itself so a new brush appears in the picker.
+     */
+    fun installExtensionFromUri(uri: Uri) {
+        viewModelScope.launch(dispatchers.io) {
+            val result = runCatching {
+                val input = context.contentResolver.openInputStream(uri)
+                    ?: error("Couldn't open that file")
+                input.use { extensionRepository.installFromStream(it, System.currentTimeMillis()) }
+            }
+            withContext(dispatchers.main) {
+                result.fold(
+                    onSuccess = { Toast.makeText(context, "Installed ${it.manifest.name}", Toast.LENGTH_SHORT).show() },
+                    onFailure = { Toast.makeText(context, "Couldn't install: ${it.message}", Toast.LENGTH_LONG).show() },
+                )
+            }
+        }
+    }
 
     /**
      * Select an installed azphalt stamp brush by extension [id], or pass null to return to the built-in
