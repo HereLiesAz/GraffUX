@@ -123,6 +123,32 @@ object BrushStamps {
         return out
     }
 
+    /**
+     * Radial alpha coverage of a round stamp at normalized radius [rNorm] (0 = centre, 1 = edge) for a
+     * given [hardness] (0..1). Fully covered out to `rNorm = hardness`, then a linear ramp to zero at
+     * the edge — the profile a renderer feeds a radial gradient (`hardness` is the solid-core stop). A
+     * hard brush (`hardness = 1`) is a crisp disc; a soft one (`hardness = 0`) fades from the centre.
+     */
+    fun stampCoverage(rNorm: Float, hardness: Float): Float {
+        if (rNorm <= 0f) return 1f
+        if (rNorm >= 1f) return 0f
+        val h = hardness.coerceIn(0f, 1f)
+        if (rNorm <= h) return 1f
+        val denom = 1f - h
+        if (denom <= 1e-4f) return 1f   // effectively hard; avoid divide-by-zero
+        return ((1f - rNorm) / denom).coerceIn(0f, 1f)
+    }
+
+    /**
+     * Procreate-style flow build-up: the new coverage after laying a dab of [flow] (0..1) over an area
+     * already at [current] (0..1). Each dab adds `flow · (1 − current)`, so overlapping dabs approach —
+     * but never overshoot — full opacity, and a low flow paints in gradually. `flow = 1` snaps to full.
+     */
+    fun buildUp(current: Float, flow: Float): Float {
+        val c = current.coerceIn(0f, 1f)
+        return (c + flow.coerceIn(0f, 1f) * (1f - c)).coerceIn(0f, 1f)
+    }
+
     /** Stroke heading in degrees at dab [i] of [count], read from neighbouring centres; 0 if undefined. */
     private fun headingAt(centres: List<Float>, i: Int, count: Int): Float {
         if (count < 2) return 0f

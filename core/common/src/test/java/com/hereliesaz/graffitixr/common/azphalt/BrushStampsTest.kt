@@ -114,4 +114,36 @@ class BrushStampsTest {
     fun emptyStrokeYieldsNoDabs() {
         assertTrue(BrushStamps.dabs(emptyList(), 8f, hardRound, seed = 1L).isEmpty())
     }
+
+    // ---- Stamp coverage + flow build-up ----
+
+    @Test
+    fun hardStampIsADiscSoftStampFadesFromCentre() {
+        // Hard: full coverage everywhere inside, zero at the edge.
+        assertEquals(1f, BrushStamps.stampCoverage(0f, hardness = 1f), 1e-4f)
+        assertEquals(1f, BrushStamps.stampCoverage(0.99f, hardness = 1f), 1e-4f)
+        assertEquals(0f, BrushStamps.stampCoverage(1f, hardness = 1f), 1e-4f)
+        // Soft (hardness 0): linear falloff — half coverage at half radius.
+        assertEquals(1f, BrushStamps.stampCoverage(0f, hardness = 0f), 1e-4f)
+        assertEquals(0.5f, BrushStamps.stampCoverage(0.5f, hardness = 0f), 1e-4f)
+        assertEquals(0f, BrushStamps.stampCoverage(1f, hardness = 0f), 1e-4f)
+    }
+
+    @Test
+    fun mediumHardnessIsSolidToTheCoreThenRamps() {
+        // hardness 0.5: solid to r=0.5, then ramps to 0 at r=1 → r=0.75 gives 0.5.
+        assertEquals(1f, BrushStamps.stampCoverage(0.5f, hardness = 0.5f), 1e-4f)
+        assertEquals(0.5f, BrushStamps.stampCoverage(0.75f, hardness = 0.5f), 1e-4f)
+    }
+
+    @Test
+    fun buildUpApproachesButNeverExceedsFull() {
+        assertEquals(0.5f, BrushStamps.buildUp(0f, 0.5f), 1e-4f)          // first dab
+        assertEquals(0.75f, BrushStamps.buildUp(0.5f, 0.5f), 1e-4f)      // second dab builds up
+        assertEquals(1f, BrushStamps.buildUp(0.9f, 1f), 1e-4f)          // full flow snaps to full
+        // Many low-flow dabs converge toward 1 without overshooting.
+        var c = 0f
+        repeat(50) { c = BrushStamps.buildUp(c, 0.2f) }
+        assertTrue(c > 0.99f && c <= 1f)
+    }
 }
