@@ -161,4 +161,8 @@ data class EditorUiState(
     val viewportZoom: Float = 1f,
     // Camera rotation in degrees (two-finger twist rotates the whole canvas about the pinch centroid).
     val viewportRotation: Float = 0f,
+    // Active snap guide lines (world-space) shown while dragging a layer: vertical lines at these x's,
+    // horizontal at these y's. Empty when not snapping.
+    val snapGuidesX: List<Float> = emptyList(),
+    val snapGuidesY: List<Float> = emptyList(),
 )

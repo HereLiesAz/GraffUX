@@ -95,6 +95,7 @@ internal object EditorReducer {
             viewportZoom = intent.zoom.coerceIn(0.1f, 10f),
             viewportRotation = intent.rotation,
         )
+        is EditorIntent.SetSnapGuides -> state.copy(snapGuidesX = intent.x, snapGuidesY = intent.y)
         EditorIntent.ToggleHandedness -> state.copy(isRightHanded = !state.isRightHanded)
         EditorIntent.ToggleDiagOverlay -> state.copy(showDiagOverlay = !state.showDiagOverlay)
         EditorIntent.FeedbackShown -> state.copy(showRotationAxisFeedback = false)

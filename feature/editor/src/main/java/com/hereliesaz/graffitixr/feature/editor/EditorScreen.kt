@@ -167,6 +167,16 @@ fun EditorScreen(
             documentHeight = uiState.documentHeight,
             modifier = Modifier.fillMaxSize(),
         )
+
+        // 1c. Snap guides — world-space alignment lines shown while dragging a layer. Drawn inside the
+        // camera container so they pan/zoom/rotate with the workspace. Purely visual.
+        if (uiState.snapGuidesX.isNotEmpty() || uiState.snapGuidesY.isNotEmpty()) {
+            SnapGuides(
+                guidesX = uiState.snapGuidesX,
+                guidesY = uiState.snapGuidesY,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
         } // end infinite-canvas camera container
 
         // 2. Transform / tap gestures — only when no brush tool is active.
@@ -222,7 +232,7 @@ fun EditorScreen(
                                     }
                                     startOnActiveLayer -> {
                                         if (!movingObject) { vm.onGestureStart(); movingObject = true }
-                                        vm.onTransformGesture(pan, 1f, 0f)
+                                        vm.onTransformGesture(pan, 1f, 0f, w, h)
                                     }
                                     else -> {
                                         if (centroid != Offset.Unspecified) vm.onViewportPanZoom(pan, 1f, centroid)
@@ -466,6 +476,21 @@ private fun PenCanvas(
             }
             drawPath(path, color, style = Stroke(width = strokeWidthPx))
         }
+    }
+}
+
+/**
+ * Draws the active snap guide lines — world-space alignment lines shown while dragging a layer, in
+ * the camera container's coordinate space: full-height verticals at [guidesX], full-width horizontals
+ * at [guidesY]. Non-interactive.
+ */
+@Composable
+private fun SnapGuides(guidesX: List<Float>, guidesY: List<Float>, modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val color = Color(0xFFFF3D7F) // magenta, distinct from the cyan selection accent
+        val stroke = 1.dp.toPx()
+        guidesX.forEach { x -> drawLine(color, Offset(x, 0f), Offset(x, size.height), strokeWidth = stroke) }
+        guidesY.forEach { y -> drawLine(color, Offset(0f, y), Offset(size.width, y), strokeWidth = stroke) }
     }
 }
 
