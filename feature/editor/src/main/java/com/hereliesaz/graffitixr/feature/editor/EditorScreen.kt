@@ -11,9 +11,20 @@ import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateRotation
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Redo
+import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.runtime.Composable
@@ -41,6 +52,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import com.hereliesaz.graffitixr.common.model.EditorUiState
 import com.hereliesaz.graffitixr.common.model.Layer
 import com.hereliesaz.graffitixr.common.model.ShapeKind
 import com.hereliesaz.graffitixr.common.model.Tool
@@ -340,6 +352,16 @@ fun EditorScreen(
             }
         }
 
+        // 4c. Viewport controls — floating canvas controls in the bottom corners (out of the rail, the
+        // way GraffitiXR anchors them): fit/reset the view on the left, undo/redo on the right. Each
+        // button shows only when it can act, so a clean canvas stays uncluttered.
+        ViewportControls(
+            uiState = uiState,
+            onReset = { vm.resetViewport() },
+            onUndo = { vm.onUndoClicked() },
+            onRedo = { vm.onRedoClicked() },
+        )
+
         // 5. Loading indicator.
         if (uiState.isLoading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -514,6 +536,52 @@ private fun SnapGuides(guidesX: List<Float>, guidesY: List<Float>, modifier: Mod
         val stroke = 1.dp.toPx()
         guidesX.forEach { x -> drawLine(color, Offset(x, 0f), Offset(x, size.height), strokeWidth = stroke) }
         guidesY.forEach { y -> drawLine(color, Offset(0f, y), Offset(size.width, y), strokeWidth = stroke) }
+    }
+}
+
+/**
+ * Floating canvas controls anchored in the bottom corners (out of the nav rail, the way GraffitiXR
+ * places them): fit/reset the infinite-canvas view on the bottom-left, undo and redo on the bottom-
+ * right. Each button appears only when it can do something — reset only off the identity view, undo/
+ * redo only with history — so a fresh, un-panned canvas shows nothing. Placed directly in the editor's
+ * root [Box] so only the buttons themselves capture touches; the rest of the canvas keeps its gestures.
+ */
+@Composable
+private fun BoxScope.ViewportControls(
+    uiState: EditorUiState,
+    onReset: () -> Unit,
+    onUndo: () -> Unit,
+    onRedo: () -> Unit,
+) {
+    val chip = Color.Black.copy(alpha = 0.35f)
+    val viewMoved = uiState.viewportZoom != 1f ||
+        uiState.viewportOffset != Offset.Zero ||
+        uiState.viewportRotation != 0f
+    if (viewMoved) {
+        IconButton(
+            onClick = onReset,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(16.dp)
+                .background(chip, CircleShape),
+        ) {
+            Icon(Icons.Filled.FitScreen, contentDescription = "Fit view to screen", tint = Color.White)
+        }
+    }
+    Row(
+        modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (uiState.undoCount > 0) {
+            IconButton(onClick = onUndo, modifier = Modifier.background(chip, CircleShape)) {
+                Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo", tint = Color.White)
+            }
+        }
+        if (uiState.redoCount > 0) {
+            IconButton(onClick = onRedo, modifier = Modifier.background(chip, CircleShape)) {
+                Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo", tint = Color.White)
+            }
+        }
     }
 }
 

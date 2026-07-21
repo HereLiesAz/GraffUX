@@ -1,14 +1,15 @@
 package com.hereliesaz.graffitixr.common.azphalt
 
-import kotlin.math.PI
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.sin
 import kotlin.random.Random
 
-private const val RAD_TO_DEG = 180.0 / PI
-private const val DEG_TO_RAD = PI / 180.0
+// Single-precision so the per-dab trig stays in Float and hits the fast atan2/cos/sin overloads —
+// no Float→Double→Float round-tripping on the hot path.
+private const val RAD_TO_DEG = 57.29578f
+private const val DEG_TO_RAD = 0.017453292f
 
 /**
  * A single concrete stamp instance the renderer draws: its centre ([x],[y] in the stroke's units), its
@@ -113,8 +114,8 @@ object BrushStamps {
             if (brush.scatter > 0f && diameter > 0f) {
                 val mag = brush.scatter * diameter * (scatR * 2f - 1f)   // ±scatter·diameter
                 val perpRad = (headingDeg + 90f) * DEG_TO_RAD
-                x += (mag * cos(perpRad)).toFloat()
-                y += (mag * sin(perpRad)).toFloat()
+                x += mag * cos(perpRad)
+                y += mag * sin(perpRad)
             }
             val angle = brush.angle + if (brush.followStroke) headingDeg else 0f
             out.add(Dab(x, y, radius, alpha, angle))
@@ -129,7 +130,7 @@ object BrushStamps {
         val dx = centres[2 * b] - centres[2 * a]
         val dy = centres[2 * b + 1] - centres[2 * a + 1]
         if (dx == 0f && dy == 0f) return 0f
-        return (atan2(dy.toDouble(), dx.toDouble()) * RAD_TO_DEG).toFloat()
+        return atan2(dy, dx) * RAD_TO_DEG
     }
 
     /** Total arc length of a poly-line — the stroke length a caller divides by [stepPx] for a dab count. */

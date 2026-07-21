@@ -382,11 +382,14 @@ private fun BrushSizePad(vm: EditorViewModel) {
                 detectDragGestures { change, drag ->
                     change.consume()
                     val maxPx = maxOf(itemPx, 1f)
-                    if (kotlin.math.abs(drag.y) >= kotlin.math.abs(drag.x)) {
+                    // Both axes each frame so a diagonal drag tunes size AND hardness together (no
+                    // per-frame axis lock that would jitter between the two on a diagonal).
+                    if (drag.y != 0f) {
                         // Vertical → size. Up (negative dy) grows the tip.
                         val cur = vm.uiState.value.brushSize
                         vm.setBrushSize((cur - drag.y * 0.5f).coerceIn(1f, maxPx))
-                    } else {
+                    }
+                    if (drag.x != 0f) {
                         // Horizontal → feathering (hardness). Right softens.
                         val cur = vm.uiState.value.brushFeathering
                         vm.setBrushFeathering((cur + drag.x * 0.005f).coerceIn(0f, 1f))
@@ -541,18 +544,7 @@ private fun AzNavHostScope.ConfigureRailItems(
         }
     }
 
-    // Recentre the infinite-canvas camera (only when it's off identity).
-    if (uiState.viewportZoom != 1f || uiState.viewportOffset != androidx.compose.ui.geometry.Offset.Zero) {
-        azRailItem(id = "view.reset", text = "Reset View", color = Cyan) { vm.resetViewport() }
-    }
-
-    // History.
-    azRailItem(
-        id = "hist.undo", text = navStrings.undo,
-        color = if (uiState.undoCount > 0) navItemColor else Color.Gray,
-    ) { if (uiState.undoCount > 0) vm.onUndoClicked() }
-    azRailItem(
-        id = "hist.redo", text = navStrings.redo,
-        color = if (uiState.redoCount > 0) navItemColor else Color.Gray,
-    ) { if (uiState.redoCount > 0) vm.onRedoClicked() }
+    // Reset-view and undo/redo are no longer rail items — they live as floating controls in the
+    // canvas's bottom corners (EditorScreen.ViewportControls): fit/reset bottom-left, undo/redo
+    // bottom-right, matching GraffitiXR's placement.
 }
