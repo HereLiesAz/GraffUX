@@ -13,6 +13,17 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 
 /**
+ * Defines the functional role of a layer in the scene graph.
+ */
+enum class LayerType {
+    RASTER,
+    VECTOR,
+    GROUP,
+    FILTER,
+    MASK
+}
+
+/**
  * Represents a single graphical layer in the editor with all aesthetic and spatial parameters.
  * Serializable fields cover all wire-transferable state. Bitmap is runtime-only and excluded.
  */
@@ -20,6 +31,8 @@ import kotlinx.serialization.Transient
 data class Layer(
     val id: String,
     val name: String,
+    val type: LayerType = LayerType.RASTER,
+    val parentId: String? = null,
     @Serializable(with = UriSerializer::class)
     val uri: Uri? = null,
     @Transient
@@ -95,7 +108,8 @@ enum class EditorPanel {
     ADJUSTMENTS,
     TRANSFORM,
     COLOR,
-    ADJUST
+    ADJUST,
+    EXTENSIONS
 }
 
 /**
@@ -135,6 +149,8 @@ data class EditorUiState(
     // Flow [0..1] for an azphalt stamp brush: per-dab paint build-up. Ignored by the built-in brush.
     val brushFlow: Float = 1f,
     val sketchThickness: Int = 5,
+    val stabilizerLevel: Int = 0,
+    val wrapAroundMode: Boolean = false,
     val activeColor: Color = Color.White,
     val showColorPicker: Boolean = false,
     val showDiagOverlay: Boolean = false,

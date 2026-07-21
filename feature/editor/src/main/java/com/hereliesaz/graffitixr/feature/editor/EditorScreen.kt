@@ -57,6 +57,8 @@ import com.hereliesaz.graffitixr.common.model.Layer
 import com.hereliesaz.graffitixr.common.model.ShapeKind
 import com.hereliesaz.graffitixr.common.model.Tool
 import com.hereliesaz.graffitixr.common.model.VectorShape
+import com.hereliesaz.graffitixr.common.model.LayerNode
+import com.hereliesaz.graffitixr.common.model.buildLayerTree
 import com.hereliesaz.graffitixr.design.theme.rememberAppStrings
 import kotlin.math.PI
 import kotlin.math.abs
@@ -102,7 +104,7 @@ fun EditorScreen(
     ) {
         // Infinite-canvas camera: pans/zooms the layer stack + artboard together (identity = no-op).
         // Screen-space overlays below (gestures, selection, panels) stay OUTSIDE it, in screen space.
-        Box(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
@@ -114,89 +116,44 @@ fun EditorScreen(
                     transformOrigin = TransformOrigin(0f, 0f)
                 }
         ) {
-        // 0. Page — the document's own fill (canvasBackground) drawn at the artboard, behind layers,
-        // so the empty document is a visible page on the darker workspace.
-        ArtboardPage(
-            documentWidth = uiState.documentWidth,
-            documentHeight = uiState.documentHeight,
-            color = uiState.canvasBackground,
-            modifier = Modifier.fillMaxSize(),
-        )
-        // 0b. Infinite reference grid — thin, always visible over the page/workspace on any background,
-        // panning/zooming/rotating with the canvas. Above the page fill, below the layers, so an empty
-        // document shows the grid but painting covers it.
-        InfiniteGrid(
-            zoom = uiState.viewportZoom,
-            offset = uiState.viewportOffset,
-            rotationDeg = uiState.viewportRotation,
-            modifier = Modifier.fillMaxSize(),
-        )
-        // 1. Layer stack render.
-        uiState.layers.filter { it.isVisible }.forEach { layer ->
-            key(layer.id) {
-                // Vector layer: drawn from its shapes via Canvas. (A raster layer's bitmap path below
-                // no-ops for it, since a vector layer carries no bitmap.)
-                if (layer.shapes.isNotEmpty()) {
-                    VectorLayerContent(layer, modifier = Modifier.fillMaxSize())
-                }
-                val isLive = layer.id == uiState.liveStrokeLayerId
-                val bmp = if (isLive) uiState.liveStrokeBitmap ?: layer.bitmap else layer.bitmap
-                bmp?.let { displayBmp ->
-                    val imageBitmap = if (isLive) {
-                        val version = uiState.liveStrokeVersion
-                        remember(version) { displayBmp.asImageBitmap() }
-                    } else {
-                        remember(displayBmp) { displayBmp.asImageBitmap() }
-                    }
-                    // Memoize the colour filter so it isn't rebuilt on every recomposition for every
-                    // layer (a per-frame allocation storm) — recompute only when inputs change.
-                    val colorFilter = remember(
-                        layer.saturation, layer.contrast, layer.brightness,
-                        layer.colorBalanceR, layer.colorBalanceG, layer.colorBalanceB,
-                        layer.isInverted
-                    ) {
-                        ColorFilter.colorMatrix(
-                            createColorMatrix(
-                                saturation = layer.saturation,
-                                contrast = layer.contrast,
-                                brightness = layer.brightness,
-                                colorBalanceR = layer.colorBalanceR,
-                                colorBalanceG = layer.colorBalanceG,
-                                colorBalanceB = layer.colorBalanceB,
-                                isInverted = layer.isInverted
-                            )
-                        )
-                    }
-                    // Offscreen compositing is only needed to isolate a non-default blend mode; for
-                    // normal (SrcOver) layers, Auto avoids the extra full-screen pass per frame.
-                    val needsOffscreen = layer.blendMode != BlendMode.SrcOver
-                    Image(
-                        bitmap = imageBitmap,
-                        contentDescription = null,
-                        colorFilter = colorFilter,
+            val imageAspect = uiState.documentWidth.toFloat() / uiState.documentHeight.toFloat()
+            val screenAspect = maxWidth.value / maxHeight.value
+            val renderWidth = if (imageAspect > screenAspect) maxWidth.value else maxHeight.value * imageAspect
+            val renderHeight = if (imageAspect > screenAspect) maxWidth.value / imageAspect else maxHeight.value
+
+            val tileIndices = if (uiState.wrapAroundMode) -1..1 else 0..0
+
+            for (dx in tileIndices) {
+                for (dy in tileIndices) {
+                    Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .graphicsLayer {
-                                translationX = layer.offset.x
-                                translationY = layer.offset.y
-                                scaleX = layer.scale
-                                scaleY = layer.scale
-                                rotationX = layer.rotationX
-                                rotationY = layer.rotationY
-                                rotationZ = layer.rotationZ
-                                alpha = layer.opacity
-                                transformOrigin = TransformOrigin.Center
-                                blendMode = layer.blendMode
-                                compositingStrategy = if (needsOffscreen)
-                                    CompositingStrategy.Offscreen
-                                else
-                                    CompositingStrategy.Auto
-                            },
-                        contentScale = ContentScale.Fit
-                    )
+                            .offset(x = (dx * renderWidth).dp, y = (dy * renderHeight).dp)
+                    ) {
+                        // 0. Page — the document's own fill
+                        ArtboardPage(
+                            documentWidth = uiState.documentWidth,
+                            documentHeight = uiState.documentHeight,
+                            color = uiState.canvasBackground,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                        // 0b. Infinite reference grid
+                        if (dx == 0 && dy == 0) {
+                            InfiniteGrid(
+                                zoom = uiState.viewportZoom,
+                                offset = uiState.viewportOffset,
+                                rotationDeg = uiState.viewportRotation,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                        // 1. Layer stack render.
+                        val layerTree = remember(uiState.layers) { com.hereliesaz.graffitixr.common.util.buildLayerTree(uiState.layers) }
+                        layerTree.forEach { node ->
+                            LayerStackNode(node, uiState)
+                        }
+                    }
                 }
             }
-        }
 
         // 1b. Artboard frame — the document bounds. A non-interactive overlay: dims the workspace
         // outside the centered, aspect-fit document rect and outlines it, so the fixed output size is
@@ -390,6 +347,107 @@ fun EditorScreen(
         if (uiState.isLoading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
+            }
+        }
+    }
+}
+
+@Composable
+private fun LayerStackNode(
+    node: LayerNode,
+    uiState: EditorUiState,
+    modifier: Modifier = Modifier
+) {
+    val layer = node.layer
+    if (!layer.isVisible) return
+
+    key(layer.id) {
+        if (layer.type == com.hereliesaz.graffitixr.common.model.LayerType.GROUP) {
+            Box(
+                modifier = modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        translationX = layer.offset.x
+                        translationY = layer.offset.y
+                        scaleX = layer.scale
+                        scaleY = layer.scale
+                        rotationX = layer.rotationX
+                        rotationY = layer.rotationY
+                        rotationZ = layer.rotationZ
+                        alpha = layer.opacity
+                        transformOrigin = TransformOrigin.Center
+                        blendMode = layer.blendMode
+                        compositingStrategy = if (layer.blendMode != BlendMode.SrcOver)
+                            CompositingStrategy.Offscreen
+                        else
+                            CompositingStrategy.Auto
+                    }
+            ) {
+                node.children.forEach { child ->
+                    LayerStackNode(child, uiState)
+                }
+            }
+        } else {
+            // Vector layer: drawn from its shapes via Canvas. (A raster layer's bitmap path below
+            // no-ops for it, since a vector layer carries no bitmap.)
+            if (layer.shapes.isNotEmpty()) {
+                VectorLayerContent(layer, modifier = Modifier.fillMaxSize())
+            }
+            val isLive = layer.id == uiState.liveStrokeLayerId
+            val bmp = if (isLive) uiState.liveStrokeBitmap ?: layer.bitmap else layer.bitmap
+            bmp?.let { displayBmp ->
+                val imageBitmap = if (isLive) {
+                    val version = uiState.liveStrokeVersion
+                    remember(version) { displayBmp.asImageBitmap() }
+                } else {
+                    remember(displayBmp) { displayBmp.asImageBitmap() }
+                }
+                // Memoize the colour filter so it isn't rebuilt on every recomposition for every
+                // layer (a per-frame allocation storm) — recompute only when inputs change.
+                val colorFilter = remember(
+                    layer.saturation, layer.contrast, layer.brightness,
+                    layer.colorBalanceR, layer.colorBalanceG, layer.colorBalanceB,
+                    layer.isInverted
+                ) {
+                    ColorFilter.colorMatrix(
+                        createColorMatrix(
+                            saturation = layer.saturation,
+                            contrast = layer.contrast,
+                            brightness = layer.brightness,
+                            colorBalanceR = layer.colorBalanceR,
+                            colorBalanceG = layer.colorBalanceG,
+                            colorBalanceB = layer.colorBalanceB,
+                            isInverted = layer.isInverted
+                        )
+                    )
+                }
+                // Offscreen compositing is only needed to isolate a non-default blend mode; for
+                // normal (SrcOver) layers, Auto avoids the extra full-screen pass per frame.
+                val needsOffscreen = layer.blendMode != BlendMode.SrcOver
+                Image(
+                    bitmap = imageBitmap,
+                    contentDescription = null,
+                    colorFilter = colorFilter,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            translationX = layer.offset.x
+                            translationY = layer.offset.y
+                            scaleX = layer.scale
+                            scaleY = layer.scale
+                            rotationX = layer.rotationX
+                            rotationY = layer.rotationY
+                            rotationZ = layer.rotationZ
+                            alpha = layer.opacity
+                            transformOrigin = TransformOrigin.Center
+                            blendMode = layer.blendMode
+                            compositingStrategy = if (needsOffscreen)
+                                CompositingStrategy.Offscreen
+                            else
+                                CompositingStrategy.Auto
+                        },
+                    contentScale = ContentScale.Fit
+                )
             }
         }
     }

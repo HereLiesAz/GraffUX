@@ -153,10 +153,12 @@ class ExtensionRepository @Inject constructor(
         }
     }
 
-    fun uninstall(id: String) = synchronized(lock) {
-        val ext = _installed.value.find { it.id == id } ?: return
-        File(ext.dir).deleteRecursively()
-        _installed.value = scanInstalled()
+    fun uninstall(id: String) {
+        synchronized(lock) {
+            val ext = _installed.value.find { it.id == id } ?: return@synchronized
+            File(ext.dir).deleteRecursively()
+            _installed.value = scanInstalled()
+        }
     }
 
     /**
@@ -212,6 +214,18 @@ class ExtensionRepository @Inject constructor(
         asset.type == AssetType.BRUSH && asset.standalone
 
     /**
+     * Installed code or mixed extensions that contribute filters.
+     */
+    fun installedFilters(): List<InstalledExtension> =
+        _installed.value.filter { ext -> ext.manifest.contributes?.filters?.isNotEmpty() == true }
+
+    /**
+     * Installed code or mixed extensions that contribute tools.
+     */
+    fun installedTools(): List<InstalledExtension> =
+        _installed.value.filter { ext -> ext.manifest.contributes?.tools?.isNotEmpty() == true }
+
+    /**
      * Absolute path to a bundled file [relative] within installed extension [id] (e.g. a brush's stamp
      * or grain image), or null if the extension isn't installed, the path is blank, or the file is
      * absent. The caller decodes it (a Bitmap decode belongs in the Android/editor layer, not here).
@@ -221,6 +235,44 @@ class ExtensionRepository @Inject constructor(
         val ext = _installed.value.find { it.id == id } ?: return null
         val file = File(ext.filePath(relative))
         return if (file.exists()) file.absolutePath else null
+    }
+
+    /**
+     * Executes a code extension's payload in an isolated sandbox, binding the given host capabilities.
+     */
+    fun executeCodeExtension(id: String, host: com.hereliesaz.graffitixr.data.azphalt.sandbox.AzphaltSandboxHost) {
+        val ext = _installed.value.find { it.id == id } ?: return
+        if (ext.manifest.kind != com.hereliesaz.graffitixr.common.azphalt.ExtensionKind.CODE && ext.manifest.kind != com.hereliesaz.graffitixr.common.azphalt.ExtensionKind.MIXED) return
+        
+        val entryPath = ext.manifest.entry ?: return
+        val file = File(ext.filePath(entryPath))
+        if (!file.exists()) return
+        
+        val caps = ext.manifest.capabilities?.map { it.wire }?.toSet() ?: emptySet()
+        
+        when (ext.manifest.runtime) {
+            com.hereliesaz.graffitixr.common.azphalt.Runtime.WASM -> {
+                com.hereliesaz.graffitixr.data.azphalt.sandbox.WasmSandbox(
+                    file.inputStream(),
+                    host,
+                    caps
+                )
+            }
+            com.hereliesaz.graffitixr.common.azphalt.Runtime.JS -> {
+                val jsCode = file.readText()
+                val qjsWasmStream = context.assets.open("wasm/quickjs.wasm")
+                val jsSandbox = com.hereliesaz.graffitixr.data.azphalt.sandbox.JsSandbox(
+                    jsCode,
+                    qjsWasmStream,
+                    host,
+                    caps
+                )
+                jsSandbox.eval()
+            }
+            else -> {
+                // Unsupported runtime
+            }
+        }
     }
 
     private fun openSource(source: String): InputStream = when {

@@ -188,33 +188,34 @@ class AzpInstallerTest {
     }
 
     @Test
-    fun `code package is rejected by the asset-only host`() {
+    fun `code package installs successfully for WASM sandbox`() {
         val payload = mapOf("LICENSE" to license)
         val bytes = zip(payload + ("manifest.json" to manifest("com.test.code", payload, kind = "code")))
 
         val installer = AzpInstaller(tmp.newFolder("extensions"))
-        try {
-            installer.install(ByteArrayInputStream(bytes), nowMs = 0L)
-            fail("Expected InstallException for kind=code")
-        } catch (e: AzpInstaller.InstallException) {
-            assertTrue(e.message!!.contains("kind=code"))
-        }
+        val installed = installer.install(ByteArrayInputStream(bytes), nowMs = 0L)
+        assertEquals("com.test.code", installed.id)
     }
 
     @Test
-    fun `app mcp and unknown host-integration kinds are rejected by the asset-only host`() {
-        // A future/unrecognised kind parses as ExtensionKind.UNKNOWN (wire "unknown") and is refused too.
-        for (kind in listOf("app", "mcp", "future_kind")) {
-            val expectedKind = if (kind == "future_kind") "unknown" else kind
+    fun `app mcp and pack kinds install successfully but unknown kind is rejected`() {
+        for (kind in listOf("app", "mcp", "pack")) {
             val payload = mapOf("LICENSE" to license)
             val bytes = zip(payload + ("manifest.json" to manifest("com.test.$kind", payload, kind = kind)))
             val installer = AzpInstaller(tmp.newFolder("extensions-$kind"))
-            try {
-                installer.install(ByteArrayInputStream(bytes), nowMs = 0L)
-                fail("Expected InstallException for kind=$kind")
-            } catch (e: AzpInstaller.InstallException) {
-                assertTrue(e.message!!.contains("kind=$expectedKind"))
-            }
+            val installed = installer.install(ByteArrayInputStream(bytes), nowMs = 0L)
+            assertEquals("com.test.$kind", installed.id)
+        }
+
+        // A future/unrecognised kind parses as ExtensionKind.UNKNOWN (wire "unknown") and is refused.
+        val payload = mapOf("LICENSE" to license)
+        val bytes = zip(payload + ("manifest.json" to manifest("com.test.future", payload, kind = "future_kind")))
+        val installer = AzpInstaller(tmp.newFolder("extensions-future"))
+        try {
+            installer.install(ByteArrayInputStream(bytes), nowMs = 0L)
+            fail("Expected InstallException for kind=future_kind")
+        } catch (e: AzpInstaller.InstallException) {
+            assertTrue(e.message!!.contains("kind=unknown"))
         }
     }
 

@@ -40,6 +40,7 @@ retrofit = "3.0.0"
 okhttp = "5.4.0"
 zxingCore = "3.5.4"
 zxingAndroidEmbedded = "4.3.0"
+chicory = "0.0.12"
 
 [libraries]
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
@@ -113,6 +114,9 @@ androidx-room-external-antlr = { group = "androidx.room", name = "room-external-
 androidx-ink-brush = { group = "androidx.ink", name = "ink-brush", version.ref = "inkBrush" }
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxingCore" }
 zxing-android-embedded = { group = "com.journeyapps", name = "zxing-android-embedded", version.ref = "zxingAndroidEmbedded" }
+chicory-runtime = { group = "com.dylibso.chicory", name = "runtime", version.ref = "chicory" }
+chicory-wasm = { group = "com.dylibso.chicory", name = "wasm", version.ref = "chicory" }
+chicory-wasi = { group = "com.dylibso.chicory", name = "wasi", version.ref = "chicory" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

@@ -60,6 +60,7 @@ import com.hereliesaz.graffitixr.feature.editor.stencil.StencilProcessor
 import com.hereliesaz.graffitixr.feature.editor.stencil.StencilProgress
 import com.hereliesaz.graffitixr.feature.editor.util.ImageProcessor
 import com.hereliesaz.graffitixr.common.util.SketchProcessor
+import com.hereliesaz.graffitixr.common.util.StrokeStabilizer
 import kotlinx.coroutines.flow.collect
 
 data class StrokeCommand(
@@ -131,6 +132,18 @@ class EditorViewModel @Inject constructor(
             projectRepository.updateProject { it.copy(railExpansion = it.railExpansion + (hostId to expanded)) }
         }
     }
+
+    /**
+     * Active, loaded code extensions (filters and tools) exposed to the UI panels.
+     */
+    val installedExtensions: StateFlow<List<com.hereliesaz.graffitixr.data.azphalt.InstalledExtension>> =
+        extensionRepository.installed
+            .map { list -> list.filter { it.manifest.kind == com.hereliesaz.graffitixr.common.azphalt.ExtensionKind.CODE || it.manifest.kind == com.hereliesaz.graffitixr.common.azphalt.ExtensionKind.MIXED } }
+            .stateIn(
+                viewModelScope,
+                SharingStarted.WhileSubscribed(5_000),
+                emptyList()
+            )
 
     private val history = EditHistory()
 
@@ -220,6 +233,8 @@ class EditorViewModel @Inject constructor(
     // Bitmap-space stroke points, appended incrementally so each drag frame maps only the NEW points
     // instead of re-mapping the whole stroke (interleaved [x0,y0,…]).
     private val stampMappedPoints = ArrayList<Float>()
+
+    private val strokeStabilizer = StrokeStabilizer()
 
     init {
         viewModelScope.launch(dispatchers.main) {
@@ -437,6 +452,46 @@ class EditorViewModel @Inject constructor(
             }
 
             scheduleDiskSave(layerId, newBitmap, layer.uri)
+        }
+    }
+
+    private val sandboxHost = object : com.hereliesaz.graffitixr.data.azphalt.sandbox.AzphaltSandboxHost {
+        override fun requestRedraw() {
+            val layerId = _uiState.value.activeLayerId ?: return
+            rebuildLayerBitmap(layerId, emitOp = true)
+        }
+        override fun canvasWidth(): Int = _uiState.value.documentWidth
+        override fun canvasHeight(): Int = _uiState.value.documentHeight
+        override fun canvasDpi(): Int = context.resources.displayMetrics.densityDpi
+        
+        override fun paramNumber(key: String): Double? = null
+        override fun paramBool(key: String): Boolean? = null
+        override fun paramString(key: String): String? = null
+        
+        override fun colorActive(): Int = _uiState.value.activeColor.toArgb()
+        override fun colorSetActive(rgba: Int) {
+            // Unused for now, but should dispatch intent
+        }
+        
+        override fun assetRead(path: String): ByteArray? = null
+        override fun selectionSize(): Int = 0
+        override fun selectionRead(): ByteArray = ByteArray(0)
+        override fun layerCount(): Int = _uiState.value.layers.size
+    }
+
+    fun onExtensionSelected(id: String) {
+        viewModelScope.launch(dispatchers.io) {
+            try {
+                extensionRepository.executeCodeExtension(id, sandboxHost)
+                // If it succeeds, maybe dismiss the panel
+                withContext(dispatchers.main) {
+                    dispatch(EditorIntent.DismissPanel)
+                }
+            } catch (e: Exception) {
+                withContext(dispatchers.main) {
+                    Toast.makeText(context, "Extension execution failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
         }
     }
 
@@ -1730,6 +1785,9 @@ class EditorViewModel @Inject constructor(
     override fun onScaleChanged(s: Float) = dispatch(EditorIntent.SetScale(s))
     override fun onOffsetChanged(o: Offset) = dispatch(EditorIntent.AddOffset(o))
 
+    fun setStabilizerLevel(level: Int) = dispatch(EditorIntent.SetStabilizerLevel(level))
+    fun toggleWrapAroundMode() = dispatch(EditorIntent.ToggleWrapAroundMode)
+
     override fun onRotationXChanged(d: Float) = dispatch(EditorIntent.SetRotationX(d))
     override fun onRotationYChanged(d: Float) = dispatch(EditorIntent.SetRotationY(d))
     override fun onRotationZChanged(d: Float) = dispatch(EditorIntent.SetRotationZ(d))
@@ -2022,7 +2080,10 @@ class EditorViewModel @Inject constructor(
         val layer = state.layers.find { it.id == layerId } ?: return
         val originalBitmap = layer.bitmap ?: return
 
-        resetStrokePoints(startPoint)
+        strokeStabilizer.reset()
+        val stabilizedStart = strokeStabilizer.stabilize(startPoint, state.stabilizerLevel)
+
+        resetStrokePoints(stabilizedStart)
         strokeLayerId = layerId
         strokeCanvasW = canvasSize.width
         strokeCanvasH = canvasSize.height
@@ -2103,14 +2164,40 @@ class EditorViewModel @Inject constructor(
             )
 
             if (mappedAll.size == 1) {
-                workCanvas.drawPoint(mappedAll[0].x, mappedAll[0].y, paint)
+                if (state.wrapAroundMode) {
+                    val w = workBitmap.width.toFloat()
+                    val h = workBitmap.height.toFloat()
+                    for (dx in -1..1) {
+                        for (dy in -1..1) {
+                            workCanvas.drawPoint(mappedAll[0].x + dx * w, mappedAll[0].y + dy * h, paint)
+                        }
+                    }
+                } else {
+                    workCanvas.drawPoint(mappedAll[0].x, mappedAll[0].y, paint)
+                }
             } else {
                 val seg = android.graphics.Path()
                 seg.moveTo(mappedAll[0].x, mappedAll[0].y)
                 for (i in 1 until mappedAll.size) {
                     seg.lineTo(mappedAll[i].x, mappedAll[i].y)
                 }
-                workCanvas.drawPath(seg, paint)
+                if (state.wrapAroundMode) {
+                    val w = workBitmap.width.toFloat()
+                    val h = workBitmap.height.toFloat()
+                    for (dx in -1..1) {
+                        for (dy in -1..1) {
+                            if (dx == 0 && dy == 0) {
+                                workCanvas.drawPath(seg, paint)
+                            } else {
+                                val p = android.graphics.Path(seg)
+                                p.offset(dx * w, dy * h)
+                                workCanvas.drawPath(p, paint)
+                            }
+                        }
+                    }
+                } else {
+                    workCanvas.drawPath(seg, paint)
+                }
             }
 
             val lastMapped = mappedAll.last()
@@ -2131,7 +2218,8 @@ class EditorViewModel @Inject constructor(
 
     /** Called for every drag update. Draws only the new segment onto the working bitmap. */
     fun onStrokePoint(currentPoint: Offset) {
-        addStrokePoint(currentPoint)
+        val stabilizedPoint = strokeStabilizer.stabilize(currentPoint, _uiState.value.stabilizerLevel)
+        addStrokePoint(stabilizedPoint)
 
         // Liquify live preview: cancel any pending warp job and start a fresh one from the
         // original bitmap so each drag frame shows the full accumulated warp.
@@ -2226,7 +2314,24 @@ class EditorViewModel @Inject constructor(
         val seg = Path()
         seg.moveTo(prev.x, prev.y)
         seg.lineTo(mapped.x, mapped.y)
-        canvas.drawPath(seg, paint)
+
+        if (_uiState.value.wrapAroundMode) {
+            val w = workBitmap.width.toFloat()
+            val h = workBitmap.height.toFloat()
+            for (dx in -1..1) {
+                for (dy in -1..1) {
+                    if (dx == 0 && dy == 0) {
+                        canvas.drawPath(seg, paint)
+                    } else {
+                        val p = Path(seg)
+                        p.offset(dx * w, dy * h)
+                        canvas.drawPath(p, paint)
+                    }
+                }
+            }
+        } else {
+            canvas.drawPath(seg, paint)
+        }
         strokePrevBitmapPoint = mapped
 
         _uiState.update { it.copy(liveStrokeVersion = it.liveStrokeVersion + 1) }
@@ -2348,12 +2453,38 @@ class EditorViewModel @Inject constructor(
                         capturedScale, capturedOffset, capturedRotationZ
                     )
                     if (mapped.size == 1) {
-                        canvas.drawPoint(mapped[0].x, mapped[0].y, paint)
+                        if (state.wrapAroundMode) {
+                            val w = target.width.toFloat()
+                            val h = target.height.toFloat()
+                            for (dx in -1..1) {
+                                for (dy in -1..1) {
+                                    canvas.drawPoint(mapped[0].x + dx * w, mapped[0].y + dy * h, paint)
+                                }
+                            }
+                        } else {
+                            canvas.drawPoint(mapped[0].x, mapped[0].y, paint)
+                        }
                     } else if (mapped.size > 1) {
                         val seg = android.graphics.Path()
                         seg.moveTo(mapped[0].x, mapped[0].y)
                         for (i in 1 until mapped.size) seg.lineTo(mapped[i].x, mapped[i].y)
-                        canvas.drawPath(seg, paint)
+                        if (state.wrapAroundMode) {
+                            val w = target.width.toFloat()
+                            val h = target.height.toFloat()
+                            for (dx in -1..1) {
+                                for (dy in -1..1) {
+                                    if (dx == 0 && dy == 0) {
+                                        canvas.drawPath(seg, paint)
+                                    } else {
+                                        val p = android.graphics.Path(seg)
+                                        p.offset(dx * w, dy * h)
+                                        canvas.drawPath(p, paint)
+                                    }
+                                }
+                            }
+                        } else {
+                            canvas.drawPath(seg, paint)
+                        }
                     }
                 }
                 target ?: bitmap

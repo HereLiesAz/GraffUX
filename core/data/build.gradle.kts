@@ -50,6 +50,9 @@ dependencies {
     ksp(libs.hilt.compiler)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.datastore.preferences)
+    implementation(libs.chicory.runtime)
+    implementation(libs.chicory.wasm)
+    implementation(libs.chicory.wasi)
 
     testImplementation(libs.junit)
     testImplementation(libs.mockk)

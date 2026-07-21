@@ -22,6 +22,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -101,6 +102,23 @@ fun EditorUi(
                     actions = actions,
                     modifier = Modifier.padding(horizontal = 16.dp),
                 )
+            }
+
+            // 1c. Extensions Panel
+            if (uiState.activePanel == EditorPanel.EXTENSIONS) {
+                val installedExtensions by actions.installedExtensions.collectAsState()
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp)
+                        .background(Color.Black.copy(alpha = 0.8f), RoundedCornerShape(16.dp))
+                        .padding(16.dp)
+                ) {
+                    ExtensionsPanel(
+                        extensions = installedExtensions,
+                        onSelect = actions::onExtensionSelected,
+                        onClose = { actions.onDismissPanel() }
+                    )
+                }
             }
 
             // 2. Integrated Adjustments Panel (Knobs + Undo/Redo/Magic)
@@ -192,12 +210,15 @@ fun LayersPanel(
             )
         }
         // Top layer first (layers render bottom-to-top, so reverse for the panel).
+        val layerNodes = remember(layers) { flattenTree(buildLayerTree(layers)) }
         LazyColumn(Modifier.fillMaxWidth()) {
-            items(layers.reversed()) { layer ->
+            items(layerNodes) { node ->
+                val layer = node.layer
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(if (layer.id == activeLayerId) Color.Gray.copy(alpha = 0.3f) else Color.Transparent),
+                        .background(if (layer.id == activeLayerId) Color.Gray.copy(alpha = 0.3f) else Color.Transparent)
+                        .padding(start = (node.depth * 16).dp), // Indent based on depth
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = { onToggleVisibility(layer.id) }) {
@@ -207,6 +228,14 @@ fun LayersPanel(
                             tint = if (layer.isVisible) Color.White else Color.Gray,
                         )
                     }
+                    
+                    // Show a folder icon if it's a group
+                    if (layer.type == LayerType.GROUP) {
+                        Text("📁 ", color = Color.White)
+                    } else if (layer.type == LayerType.FILTER) {
+                        Text("✨ ", color = Color.White)
+                    }
+
                     if (editingId == layer.id) {
                         OutlinedTextField(
                             value = editingName,

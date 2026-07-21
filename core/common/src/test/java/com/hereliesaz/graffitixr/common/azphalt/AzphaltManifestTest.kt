@@ -215,6 +215,7 @@ class AzphaltManifestTest {
             """.trimIndent(),
         )
         assertEquals(ExtensionKind.APP, app.kind)
+        assertTrue(app.app != null)
         val mcp = parseManifest(
             """
             { "azphalt":"0.1","id":"com.x.mcp","name":"MCP","version":"1.0.0","kind":"mcp",
@@ -222,6 +223,7 @@ class AzphaltManifestTest {
             """.trimIndent(),
         )
         assertEquals(ExtensionKind.MCP, mcp.kind)
+        assertTrue(mcp.mcp != null)
         // A kind newer than this build maps to UNKNOWN instead of throwing (parses, then the installer
         // refuses it) — matching AssetType/Capability's forward-compat behaviour.
         val future = parseManifest(
@@ -496,5 +498,58 @@ class AzphaltManifestTest {
                 "license":"MIT","compat":">=0.1","pack":{"entries":[{"id":"  "}]},"files":{} }""".trimIndent(),
         )
         assertTrue(validatePackManifest(m)!!.contains("blank id"))
+    }
+
+    @Test
+    fun `parses AI model metadata fields (io, files, requirements, modelLicense)`() {
+        val m = parseManifest(
+            """
+            {
+              "azphalt": "0.1", "id": "com.ai.advanced", "name": "Advanced AI", "version": "1.0.0",
+              "kind": "asset", "license": "MIT", "compat": ">=0.1",
+              "assets": [
+                {
+                  "type": "tflite",
+                  "path": "",
+                  "role": "depth",
+                  "io": {
+                    "inputs": [{"name": "image", "shape": [1, 3, 256, 256], "dtype": "float32"}],
+                    "quantization": {"type": "none"}
+                  },
+                  "files": [
+                    {"name": "weights.bin", "remoteUrl": "https://x.com/w", "checksum": "sha256-w"}
+                  ],
+                  "requirements": {
+                    "runtime": "tflite",
+                    "accelerator": "cpu"
+                  },
+                  "modelLicense": {
+                    "spdx": "CC-BY-NC-4.0",
+                    "commercialUse": false
+                  }
+                }
+              ],
+              "files": {}
+            }
+            """.trimIndent(),
+        )
+        val asset = m.assets.single()
+        
+        val io = asset.io!!
+        assertEquals("image", io.inputs?.first()?.name)
+        assertEquals(listOf(1, 3, 256, 256), io.inputs?.first()?.shape)
+        assertEquals("none", io.quantization?.type)
+        
+        val files = asset.files!!
+        assertEquals("weights.bin", files.first().name)
+        assertEquals("https://x.com/w", files.first().remoteUrl)
+        
+        val reqs = asset.requirements!!
+        assertEquals("tflite", reqs.runtime)
+        assertEquals("cpu", reqs.accelerator)
+        
+        val lic = asset.modelLicense!!
+        assertEquals("CC-BY-NC-4.0", lic.spdx)
+        assertEquals(false, lic.commercialUse)
     }
 }

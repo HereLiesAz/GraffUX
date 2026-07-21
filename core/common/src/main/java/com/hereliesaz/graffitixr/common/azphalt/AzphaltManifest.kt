@@ -43,7 +43,12 @@ data class AzphaltManifest(
      * Static store-card preview (spec/extension-manifest.md § preview) — surfaced in registry search so
      * a host can render a browse grid without downloading or executing the package.
      */
+    /** Static store-card preview. */
     val preview: Preview? = null,
+    /** Present only on a `kind: "app"` manifest (spec/companion-app.md). */
+    val app: kotlinx.serialization.json.JsonObject? = null,
+    /** Present only on a `kind: "mcp"` manifest (spec/mcp-server.md). */
+    val mcp: kotlinx.serialization.json.JsonObject? = null,
     /** Present only on a `kind: "pack"` manifest (spec/pack.md): the member packages it references. */
     val pack: PackManifest? = null,
     /** Payload path → `sha256-…` digest. A host MUST verify every file before use. */
@@ -347,6 +352,14 @@ data class AssetContribution(
      * asset (a paper texture, a stamp) so a host can place it at its intended physical size and DPI.
      */
     val physical: PhysicalSize? = null,
+    /** Self-describing IO descriptor for model assets (inputs, outputs, quantization). */
+    val io: ModelIo? = null,
+    /** Support for multi-file model bundles (e.g. sherpa-bundle, vosk-bundle). */
+    val files: List<ModelFile>? = null,
+    /** Hardware/runtime minimum requirements for the model. */
+    val requirements: ModelRequirements? = null,
+    /** Third-party model weights license (independent of the package's SPDX license). */
+    val modelLicense: ModelLicense? = null,
 )
 
 /**
@@ -456,3 +469,74 @@ fun compatSatisfies(hostVersion: String, compat: String): Boolean {
  * conforming hosts accept.
  */
 fun isCompatibleSpec(compat: String): Boolean = compatSatisfies(AZPHALT_SPEC_VERSION, compat)
+
+/**
+ * Self-describing preprocessing/IO block for a model asset (spec/extension-manifest.md § Model IO).
+ */
+@Serializable
+data class ModelIo(
+    val inputs: List<IoTensor>? = null,
+    val outputs: List<IoTensor>? = null,
+    val labels: kotlinx.serialization.json.JsonElement? = null,
+    val quantization: Quantization? = null,
+)
+
+/** Tensor descriptor in a [ModelIo] block. */
+@Serializable
+data class IoTensor(
+    val name: String? = null,
+    val semantics: String? = null,
+    val shape: List<Int>? = null,
+    val dtype: String? = null,
+    val layout: String? = null,
+    val color: String? = null,
+    val normalization: kotlinx.serialization.json.JsonElement? = null,
+    val audio: kotlinx.serialization.json.JsonElement? = null,
+    val decode: kotlinx.serialization.json.JsonElement? = null,
+)
+
+/** Quantization info in a [ModelIo] block. */
+@Serializable
+data class Quantization(
+    val type: String,
+    val scale: kotlinx.serialization.json.JsonElement? = null,
+    val zeroPoint: kotlinx.serialization.json.JsonElement? = null,
+)
+
+/**
+ * Member file of a multi-file model bundle (spec/extension-manifest.md § Multi-file model bundles).
+ */
+@Serializable
+data class ModelFile(
+    val name: String,
+    val path: String? = null,
+    val remoteUrl: String? = null,
+    val checksum: String? = null,
+    val byteSize: Long? = null,
+    val supportsRange: Boolean? = null,
+)
+
+/**
+ * Hardware/runtime requirements block (spec/extension-manifest.md § Model requirements).
+ */
+@Serializable
+data class ModelRequirements(
+    val runtime: String? = null,
+    val formatVersion: String? = null,
+    val quantization: String? = null,
+    val accelerator: String? = null,
+    val minRamMB: Int? = null,
+)
+
+/**
+ * Third-party license for model weights (spec/extension-manifest.md § Model license).
+ */
+@Serializable
+data class ModelLicense(
+    val spdx: String? = null,
+    val commercialUse: Boolean? = null,
+    val attributionRequired: Boolean? = null,
+    val attribution: String? = null,
+    val url: String? = null,
+    val sourceUrl: String? = null,
+)

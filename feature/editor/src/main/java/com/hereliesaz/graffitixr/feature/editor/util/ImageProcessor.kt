@@ -121,7 +121,8 @@ object ImageProcessor {
                         brushColor: Int = Color.BLACK,
                         intensity: Float = 0.5f,
                         mutateInPlace: Boolean = false,
-                        feathering: Float = 0f
+                        feathering: Float = 0f,
+                        wrapAroundMode: Boolean = false
                     ): Bitmap = withContext(Dispatchers.Default) {
                         if (stroke.isEmpty()) return@withContext originalBitmap
 
@@ -142,7 +143,7 @@ object ImageProcessor {
                                                                                                         maskFilter = BlurMaskFilter(brushSize * feathering * 0.5f, BlurMaskFilter.Blur.NORMAL)
                                                                                                     }
                                                                             }
-                                                                                            drawStroke(canvas, stroke, paint)
+                                                                                            drawStroke(canvas, stroke, paint, wrapAroundMode)
                                                         }
 
                                                                     Tool.ERASER -> {
@@ -157,7 +158,7 @@ object ImageProcessor {
                                                                                                                     maskFilter = BlurMaskFilter(brushSize * feathering * 0.5f, BlurMaskFilter.Blur.NORMAL)
                                                                                                                 }
                                                                                         }
-                                                                                                        drawStroke(canvas, stroke, paint)
+                                                                                                        drawStroke(canvas, stroke, paint, wrapAroundMode)
                                                                     }
 
                                 Tool.BLUR -> {
@@ -177,7 +178,7 @@ object ImageProcessor {
                                         isAntiAlias = true
                                         if (feathering > 0f) maskFilter = BlurMaskFilter(brushSize * feathering * 0.5f, BlurMaskFilter.Blur.NORMAL)
                                     }
-                                    drawStroke(maskCanvas, stroke, maskPaint)
+                                    drawStroke(maskCanvas, stroke, maskPaint, wrapAroundMode)
                                     // Keep the blurred pixels only where the stroke drew, then composite onto the layer.
                                     maskCanvas.drawBitmap(blurred, 0f, 0f, Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN) })
                                     canvas.drawBitmap(maskBmp, 0f, 0f, null)
@@ -195,7 +196,7 @@ object ImageProcessor {
                                                                                                                                                     isAntiAlias = true
                                                                                                                                                     alpha = 128
                                                                                                                             }
-                                                                                                                                            drawStroke(canvas, stroke, paint)
+                                                                                                                                            drawStroke(canvas, stroke, paint, wrapAroundMode)
                                                                                                         }
                                                                                                         
                                                                                                                     Tool.BURN -> {
@@ -208,7 +209,7 @@ object ImageProcessor {
                                                                                                                                                                 alpha = (255 * intensity * 0.3f).toInt().coerceIn(0, 255)
                                                                                                                                                                                     xfermode = PorterDuffXfermode(PorterDuff.Mode.DARKEN)
                                                                                                                                         }
-                                                                                                                                                        drawStroke(canvas, stroke, paint)
+                                                                                                                                                        drawStroke(canvas, stroke, paint, wrapAroundMode)
                                                                                                                     }
                                                                                                                     
                                                                                                                                 Tool.DODGE -> {
@@ -220,8 +221,8 @@ object ImageProcessor {
                                                                                                                                                                             strokeJoin = Paint.Join.ROUND
                                                                                                                                                                             alpha = (255 * intensity * 0.3f).toInt().coerceIn(0, 255)
                                                                                                                                                                                                 xfermode = PorterDuffXfermode(PorterDuff.Mode.LIGHTEN)
-                                                                                                                                                                                                                }
-                                                                                                                                                                    drawStroke(canvas, stroke, paint)
+                                                                                                                                                                                }
+                                                                                                                                                                    drawStroke(canvas, stroke, paint, wrapAroundMode)
                                                                                                                                 }
                                                                                                                                 
                                                                                                                                             else -> {}
@@ -230,17 +231,45 @@ object ImageProcessor {
                                                 resultBitmap
             }
 
-                private fun drawStroke(canvas: Canvas, stroke: List<Offset>, paint: Paint) {
+                private fun drawStroke(canvas: Canvas, stroke: List<Offset>, paint: Paint, wrapAroundMode: Boolean = false) {
                             if (stroke.size == 1) {
-                                            canvas.drawPoint(stroke.first().x, stroke.first().y, paint)
-                                                        return
+                                val cx = stroke.first().x
+                                val cy = stroke.first().y
+                                if (wrapAroundMode) {
+                                    val w = canvas.width.toFloat()
+                                    val h = canvas.height.toFloat()
+                                    for (dx in -1..1) {
+                                        for (dy in -1..1) {
+                                            canvas.drawPoint(cx + dx * w, cy + dy * h, paint)
+                                        }
+                                    }
+                                } else {
+                                    canvas.drawPoint(cx, cy, paint)
+                                }
+                                return
                             }
-                                    val path = android.graphics.Path()
-                                            path.moveTo(stroke.first().x, stroke.first().y)
-                                                    for (i in 1 until stroke.size) {
-                                                                    path.lineTo(stroke[i].x, stroke[i].y)
-                                                    }
-                                                            canvas.drawPath(path, paint)
+                            val path = android.graphics.Path()
+                            path.moveTo(stroke.first().x, stroke.first().y)
+                            for (i in 1 until stroke.size) {
+                                path.lineTo(stroke[i].x, stroke[i].y)
+                            }
+                            if (wrapAroundMode) {
+                                val w = canvas.width.toFloat()
+                                val h = canvas.height.toFloat()
+                                for (dx in -1..1) {
+                                    for (dy in -1..1) {
+                                        if (dx == 0 && dy == 0) {
+                                            canvas.drawPath(path, paint)
+                                        } else {
+                                            val p = android.graphics.Path(path)
+                                            p.offset(dx * w, dy * h)
+                                            canvas.drawPath(p, paint)
+                                        }
+                                    }
+                                }
+                            } else {
+                                canvas.drawPath(path, paint)
+                            }
                 }
 
                 /**
